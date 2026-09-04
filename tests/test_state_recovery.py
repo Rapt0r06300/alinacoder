@@ -12,19 +12,23 @@ class StateRecoveryTests(unittest.TestCase):
 
     def test_state_is_reconstructible_and_evidence_becomes_stale_after_change(self) -> None:
         from alinacoder.state.models import EvidenceReceipt
+
         with tempfile.TemporaryDirectory() as td:
             store = self.make_store(Path(td))
             state0 = store.create_session("s1", {"step": 0})
             epoch = store.acquire_writer("s1")
             state1 = store.commit_state("s1", state0.version, epoch, {"step": 1}, "advance")
             evidence = EvidenceReceipt.bind("ev1", state1, {"test": "pass"})
-            self.assertEqual(store.reconstruct("s1"), state1)
-            self.assertTrue(evidence.is_fresh(state1))
+            rebuilt = store.reconstruct("s1")
+            self.assertEqual(rebuilt, state1)
+            self.assertTrue(evidence.is_fresh(rebuilt))
             state2 = store.commit_state("s1", state1.version, epoch, {"step": 2}, "advance")
             self.assertFalse(evidence.is_fresh(state2))
+            store.close()
 
     def test_stale_writer_and_stale_version_are_rejected(self) -> None:
         from alinacoder.state.store import StaleStateError, StaleWriterError
+
         with tempfile.TemporaryDirectory() as td:
             store = self.make_store(Path(td))
             state = store.create_session("s1", {})
@@ -36,6 +40,7 @@ class StateRecoveryTests(unittest.TestCase):
             with self.assertRaises(StaleStateError):
                 store.commit_state("s1", state.version, epoch2, {"x": 2}, "stale")
             self.assertEqual(store.get_state("s1"), state1)
+            store.close()
 
     def test_restore_is_forward_only_and_keeps_event_history(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -47,7 +52,9 @@ class StateRecoveryTests(unittest.TestCase):
             restored = store.restore_checkpoint("s1", "good", changed.version, epoch)
             self.assertEqual(restored.data, {"value": "a"})
             self.assertGreater(restored.version, changed.version)
-            self.assertEqual([e.kind for e in store.list_events("s1")], ["session_created", "change", "checkpoint_restore"])
+            events = store.list_events("s1")
+            self.assertEqual([event.kind for event in events], ["session_created", "change", "checkpoint_restore"])
+            store.close()
 
     def test_effect_intent_is_idempotent_and_pending_effects_recover(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -56,10 +63,13 @@ class StateRecoveryTests(unittest.TestCase):
             self.assertTrue(store.begin_effect("effect-1", "s1", {"op": "write"}))
             self.assertFalse(store.begin_effect("effect-1", "s1", {"op": "write"}))
             store.close()
+
             reopened = self.make_store(Path(td))
-            self.assertEqual([i.effect_key for i in reopened.pending_effects("s1")], ["effect-1"])
+            pending = reopened.pending_effects("s1")
+            self.assertEqual([item.effect_key for item in pending], ["effect-1"])
             reopened.ack_effect("effect-1", {"ok": True})
             self.assertEqual(reopened.pending_effects("s1"), [])
+            reopened.close()
 
 
 if __name__ == "__main__":
