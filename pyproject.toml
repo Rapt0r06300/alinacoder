@@ -1,0 +1,19 @@
+[project]
+name = "alinacoder"
+version = "0.2.0.dev0"
+description = "AlinaCoder v0.2 autonomous software engineering foundation"
+requires-python = ">=3.12"
+dependencies = []
+
+[project.scripts]
+alinacoder = "alinacoder.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
