@@ -38,6 +38,16 @@ class BootstrapSpecTests(unittest.TestCase):
             self.assertEqual(result.current_spec_path, spec_path)
             self.assertEqual(result.invariants, tuple(manifest["constitutional_invariants"]))
 
+    def test_spec_compiler_accepts_windows_crlf_for_git_lf_blob(self) -> None:
+        from alinacoder.spec.compiler import SpecCompiler
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            logical = "# Spec\nALINA.COST.ZERO.001\n"
+            (root / "spec.md").write_bytes(logical.replace("\n", "\r\n").encode("utf-8"))
+            manifest = {"current_spec": {"path": "spec.md", "source_hash": git_blob_sha(logical)}, "constitutional_invariants": ["ALINA.COST.ZERO.001"], "active_documents": []}
+            (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+            self.assertTrue(SpecCompiler(root).compile(root / "manifest.json").valid)
+
     def test_spec_compiler_fails_closed_on_hash_mismatch(self) -> None:
         from alinacoder.spec.compiler import SpecCompileError, SpecCompiler
         with tempfile.TemporaryDirectory() as td:

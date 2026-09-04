@@ -45,9 +45,19 @@ class SpecCompiler:
         path = self._safe_path(relative)
         if not path.is_file():
             raise SpecCompileError(f"Missing normative document: {relative}")
-        actual = git_blob_sha_bytes(path.read_bytes())
-        if actual != expected:
-            raise SpecCompileError(f"Normative document hash mismatch for {relative}: expected {expected}, got {actual}")
+        raw = path.read_bytes()
+        candidates = {git_blob_sha_bytes(raw)}
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            text = None
+        if text is not None:
+            normalized = text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
+            candidates.add(git_blob_sha_bytes(normalized))
+        if expected not in candidates:
+            raise SpecCompileError(
+                f"Normative document hash mismatch for {relative}: expected {expected}, got {sorted(candidates)}"
+            )
         return path
 
     def compile(self, manifest_path: Path | str) -> SpecCompileResult:
