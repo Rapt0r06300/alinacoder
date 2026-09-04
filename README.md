@@ -11,11 +11,11 @@ User
   ↓ ordinary French / optional voice
 AlinaCoder.exe
   ↓
-Zero-Cost Intelligence Mesh
+Autonomous Zero-Cost Intelligence Fabric
   ↓
-Best measured zero-cost brain(s) for this exact stage
+Strongest proven free brain(s) for this exact stage
   ↓
-governed local tools
+Continuity Spine + governed local tools
   ↓
 Repository / tests / Git / memory
 ```
@@ -44,58 +44,102 @@ The consolidated implementation baseline remains:
 
 v0.2 was explicitly reopened and extended by approved normative amendments. The current implementation contract is the baseline **plus all later normative v0.2 amendments**, with the newest relevant amendment winning where it explicitly strengthens or supersedes an affected subsystem.
 
-The current zero-cost norms are:
+The current zero-cost/frontier norms are:
 
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-desktop-intelligence-corrective-amendment.md`
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-intelligence-mesh-amendment.md`
+- `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-frontier-routing-seamless-handoff-amendment.md`
 
 The desktop corrective amendment supersedes the earlier assumption that a personal ChatGPT Plus subscription could be treated as an automatic read/write MCP or programmatic model endpoint for AlinaCoder.
 
-The intelligence-mesh amendment extends that correction into a self-updating, zero-cost multi-provider architecture.
+The intelligence-mesh amendment establishes a self-updating, zero-cost multi-provider architecture.
 
-## Zero-Cost Intelligence Mesh
+The autonomous frontier-routing amendment strengthens that mesh with continuous model discovery, champion/challenger learning, provider failover and a model-independent Continuity Spine so AlinaCoder can switch engines without losing verified project state or user intent.
 
-AlinaCoder must not rely on one permanent cloud provider or one global model ranking.
+## Autonomous Zero-Cost Intelligence Fabric
 
-It maintains a live registry of currently verified-free local and remote routes, benchmarks them on real AlinaCoder workloads, tracks quota and provider changes, and chooses the best measured model **per task stage**.
+AlinaCoder must not rely on one permanent cloud provider, one gateway, one model family or one global ranking.
+
+It maintains a live registry of currently verified-free local and remote routes, benchmarks them on real AlinaCoder workloads, tracks quota/provider changes, learns champions **per task stage**, and prepares safe fallbacks before critical work.
 
 Current research candidates include, subject to live re-verification:
 
 - local Ollama/open-weight models;
 - Google Gemini Free Tier;
-- Groq Free Plan;
+- Groq Free Plan, currently including GPT-OSS and Qwen families under free limits;
+- SambaNova Cloud Free Tier, currently exposing large-model free access without a linked payment method under strict quotas;
 - Mistral Studio Free mode;
 - OpenRouter `:free` variants and `openrouter/free`;
-- Kilo Gateway free routes such as `kilo-auto/free`;
+- Kilo Gateway `kilo-auto/free` and explicit `:free` routes;
 - Z.AI zero-price Flash models;
-- Cloudflare Workers AI free daily allowance;
+- Cloudflare Workers AI free daily allocation;
 - Ollama Cloud Free starter usage;
-- NVIDIA NIM development/prototyping access;
+- NVIDIA NIM Developer Program endpoints for prototyping/development/testing;
 - Cohere free evaluation keys;
+- ModelScope API-Inference after official account/quota proof;
 - Hugging Face monthly free inference credits;
-- opportunistic zero-price models from gateways such as OpenCode Zen or Together AI only when current metadata proves zero cost;
-- grant-based services only when the request can be proven not to consume paid balance.
+- other newly discovered gateways/providers only after official zero-cost proof and account-level capability probes.
 
 The list is deliberately dynamic. A provider/model that stops being free is quarantined before another inference request and replaced automatically by another eligible route.
 
-GitHub Models is not an active provider: it was retired on July 30, 2026. Cerebras is not canonical under the zero-cost rule because its currently documented free access is a temporary trial requiring a verified payment method rather than a permanent free tier.
+GitHub Models is not an active provider: it was retired on July 30, 2026. Cerebras is not standing zero-cost capacity under its current official policy because its free access is a 30-day credit trial requiring a verified payment method and the documentation explicitly says there is no permanent free tier.
 
 ## Intelligence routing principles
 
-AlinaCoder optimizes for **verified quality at exactly zero monetary cost**.
+AlinaCoder optimizes for **verified task success at exactly zero monetary cost**, not for raw parameter count or marketing rank.
 
 Important rules include:
 
-- model/provider marketing is only a prior; real repeated mini-tests and project outcomes decide routing;
-- the best model is learned separately for intent understanding, repository localization, architecture, patching, debugging, testing, review, research and long-context work;
+- external leaderboards/catalog rankings are priors only;
+- real repeated mini-tests and project outcomes decide routing;
+- the best route is learned separately for intent understanding, repository localization, architecture, patching, debugging, testing, review, research, vision and long-context work;
+- new models enter through cost proof → capability probe → canary → probation → champion/challenger evaluation;
 - scarce free quotas are reserved for tasks where they add the most measured value;
-- simple work should not burn premium free quotas unnecessarily;
-- multiple gateways serving the same underlying checkpoint are not counted as independent brains;
-- hard tasks may use several genuinely different model families in isolated candidate runs;
+- multiple providers serving the same checkpoint provide hosting redundancy but not independent cognitive diversity;
+- hard tasks may use several genuinely different model families only when their complementarity has been measured;
 - dense “ask every model” swarms are forbidden by default;
-- multi-model routes must earn a `RouteGainCertificate` showing they robustly beat the relevant single-model baseline;
-- disagreement should trigger discriminating tests or experiments, not blind majority vote;
-- model consensus never outranks repository truth or deterministic verification.
+- multi-model routes must earn a `RouteGainCertificate` before recurring promotion;
+- model consensus never outranks repository truth or deterministic verification;
+- no hosted gateway may become the only failover path.
+
+## Seamless model switching
+
+“No loss of thread” is implemented by preserving verified state, not by dumping the entire raw conversation into every new model.
+
+A local `ContinuitySpine` stores a versioned `CanonicalSessionState` containing the active `IntentContract`, project/repository identity, HEAD/worktree hashes, accepted decisions, constraints, plan/task DAG, verified evidence, failed hypotheses, current artifacts, pending actions and rollback checkpoint.
+
+Before a model can take over, AlinaCoder performs an atomic handoff:
+
+```text
+freeze mutations
+→ flush verified state
+→ snapshot HEAD/worktree/artifacts
+→ select best eligible zero-cost target
+→ build direction-aware HandoffEnvelope
+→ target ContinuityProof
+→ dry next-action verification
+→ resume
+```
+
+The handoff is direction-aware: escalation from a weak model strips most speculative weak-model trajectory while preserving facts and repository state; downshift from a strong model preserves more accepted high-quality planning guidance. Partial or malformed streamed output is never admitted as canonical state or applied as a patch.
+
+Provider-native session IDs, prompt caches or KV caches may accelerate continuation, but AlinaCoder must always be able to resume on a completely different provider from its portable canonical state.
+
+## Reliability and failover
+
+AlinaCoder distinguishes:
+
+```text
+Hosting failover
+= same model lineage, different eligible provider
+
+Cognitive failover
+= different model family chosen for the current task
+```
+
+Each route has typed health, quota and failure state. Circuit breakers, exponential backoff with jitter, provider reset headers, context-window prechecks and hot-standby fallback plans prevent a `429`, timeout, model retirement or gateway outage from becoming project-state corruption.
+
+Retries of mutating work are protected by operation IDs and precondition hashes so a provider failure cannot duplicate a file edit, commit or other side effect.
 
 ## Current major v0.2 capabilities
 
@@ -117,12 +161,17 @@ Important rules include:
 - model switching only at explicit safe checkpoints;
 - weak-model detection, honest uncertainty and verifiability-first task decomposition;
 - frontier-style test-time compute, independent candidate rollouts, tournament/refinement and adversarial verification;
-- dynamic `FreeProviderRegistry`, `ZeroCostAdmissionGate` and `QuotaLedger`;
+- dynamic `FreeProviderRegistry`, `FreeRouteDiscoveryEngine`, `FrontierDriftDetector`, `ZeroCostAdmissionGate` and `QuotaPortfolioManager`;
+- automatic detection of newly free/newly stronger models without automatic trust;
 - runtime discovery of free model catalogs rather than permanent hard-coded provider assumptions;
-- `ModelLineageFingerprint` so the same checkpoint on several hosts is not mistaken for several independent intelligences;
-- stage-specific, execution-grounded model routing with Context → Action → Feedback → Context learning;
-- sparse heterogeneous multi-brain collaboration only when uncertainty/difficulty justifies it;
-- route-gain certification before recurring ensembles are promoted;
+- `ModelLineageGraph` and `FailureDomainGraph` so mirrors, cognitive diversity and shared failure domains are not confused;
+- task-specific `RoutePosterior` and `ChampionChallengerRegistry` updated from execution-grounded outcomes;
+- `ScaffoldGainProfile` so manager/worker, debate or parallel-agent modes are used only on models/tasks where they actually help;
+- local `ContinuitySpine`, event-sourced session state, verified shared gists and hierarchical evidence unfolding;
+- direction-aware `HandoffEnvelope`, `ContinuityProof` and transactional model switching;
+- mid-stream failure isolation and incomplete-generation rejection;
+- two-layer same-lineage and cross-lineage failover;
+- per-route circuit breakers, quota reset awareness and prepared standby chains;
 - strict cost gate: if zero cost cannot be proven, the remote call is refused before inference;
 - no automatic upgrade from a free provider/model to a paid route;
 - ChatGPT Plus retained only as an optional **user-mediated consultation bridge** under current personal-account limitations;
@@ -136,7 +185,7 @@ Important rules include:
 - a visible **Tout arrêter** control that stops workers, provider streams, background refresh jobs, indexers, models, AlinaCoder-managed helpers and Ollama according to the configured all-Ollama shutdown policy;
 - shutdown verification before displaying `Tout est arrêté`;
 - trajectory learning, procedural skill evolution and guarded meta-harness evolution;
-- optional Supabase Free synchronization of non-secret routing/benchmark metadata without making cloud storage mandatory;
+- optional Supabase Free synchronization of non-secret routing/benchmark metadata using hybrid lexical/vector retrieval without making cloud storage mandatory;
 - local-only fallback retained when every external provider is unavailable.
 
 ## ChatGPT Plus clarification
@@ -177,10 +226,13 @@ A new message wakes only what is needed automatically.
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-frontier-chatgpt-mcp-amendment.md`
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-desktop-intelligence-corrective-amendment.md`
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-intelligence-mesh-amendment.md`
+- `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-frontier-routing-seamless-handoff-amendment.md`
 
 The zero-cost desktop corrective amendment has precedence for primary UX, ChatGPT Plus integration, cost policy, idle resources and full shutdown.
 
-The zero-cost intelligence-mesh amendment has precedence for free-provider discovery, model eligibility, quota accounting, model-lineage diversity, adaptive routing and multi-model collaboration.
+The zero-cost intelligence-mesh amendment has precedence for the base free-provider registry, model eligibility and multi-model collaboration.
+
+The autonomous frontier-routing amendment has precedence for continuous discovery, route promotion/demotion, credential health, quota portfolio management, provider failover, context mobility, model handoff, continuity proofs and mid-stream recovery.
 
 ## Design history
 
@@ -197,5 +249,6 @@ Historical design/audit documents remain available for provenance:
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-frontier-chatgpt-mcp-amendment.md`
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-desktop-intelligence-corrective-amendment.md`
 - `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-intelligence-mesh-amendment.md`
+- `docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-frontier-routing-seamless-handoff-amendment.md`
 
 New capabilities may continue to extend v0.2 only when explicitly approved as normative amendments; otherwise they should target the next version.
