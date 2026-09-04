@@ -1,0 +1,237 @@
+{
+  "manifest_version": "0.2-validated-2026-09-04",
+  "generated_at": "2026-09-04",
+  "repository": "Rapt0r06300/alinacoder",
+  "canonical_branch": "main",
+  "current_spec": {
+    "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-validated-consolidated-spec.md",
+    "source_hash": "29610123715ca7f0970908f2ec32363fd023bdb9",
+    "status": "validated_current_view"
+  },
+  "constitutional_invariants": [
+    "ALINA.COST.ZERO.001",
+    "ALINA.GIT.MAIN_ONLY.001",
+    "ALINA.INTENT.USER_AUTHORITY.001",
+    "ALINA.STATE.CANONICAL.001",
+    "ALINA.EFFECT.MEDIATION.001",
+    "ALINA.VERIFY.EVIDENCE.001",
+    "ALINA.MEMORY.PROVENANCE.001",
+    "ALINA.PROVIDER.LIVE_PROOF.001",
+    "ALINA.RECOVERY.DURABLE.001",
+    "ALINA.SPEC.NO_SILENT_DOWNGRADE.001"
+  ],
+  "resolution_policy": {
+    "date_is_not_automatic_precedence": true,
+    "conflict_order": [
+      "explicit_supersession_or_strengthening_edge",
+      "domain_specific_precedence",
+      "stronger_safety_correctness_constraint",
+      "constitutional_invariant",
+      "unresolved_conflict_blocks_affected_runtime"
+    ],
+    "volatile_provider_model_pricing_quota_claims_are": "historical_snapshot_or_research_prior",
+    "silent_downgrade_forbidden": true
+  },
+  "historical_documents": [
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.1-design.md",
+      "source_hash": "44e53b7171b88bc0da18b278c49f91aefabb3908",
+      "status": "historical",
+      "domains": ["initial_architecture"]
+    },
+    {
+      "path": "docs/audits/2026-09-04-v0.1-critical-intelligence-audit.md",
+      "source_hash": "cfeaf0ed5193f0f5797fe28d1a3c7fe58fedfc5e",
+      "status": "historical_audit",
+      "domains": ["gap_analysis", "v0.2_inputs"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-design.md",
+      "source_hash": "51585229b3197704e8dcdeafed3381e7955a1fac",
+      "status": "historical_superseded_baseline",
+      "domains": ["v0.2_early_design"]
+    }
+  ],
+  "active_documents": [
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-final-design.md",
+      "source_hash": "5ffd864ca5c7e1c70edeabfb705699cf9378431a",
+      "status": "approved_baseline",
+      "domains": ["core_architecture"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-conversation-and-external-self-improvement-amendment.md",
+      "source_hash": "c96e4f01c1d7d82e2d1bc7cde47f58847401122b",
+      "status": "approved",
+      "domains": ["conversation", "external_self_improvement"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-research-voice-context-specialists-amendment.md",
+      "source_hash": "da4958905cfe91a67356e6b63f8d8dfd55fc554b",
+      "status": "approved",
+      "domains": ["research", "voice", "context", "specialists"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-resource-awareness-model-calibration-amendment.md",
+      "source_hash": "591583c1c41e8e5cf3d385f7cece174bdc719ea8",
+      "status": "approved",
+      "domains": ["resources", "model_calibration"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-resource-anti-oscillation-checkpoints-amendment.md",
+      "source_hash": "fb21e1aeedb415b3d413f60a978b153078027b48",
+      "status": "approved",
+      "domains": ["resources", "anti_oscillation", "checkpoints"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-cognitive-intelligence-amendment.md",
+      "source_hash": "e0fc3a5abd435178069e4e877cbd9e1ec086322a",
+      "status": "approved",
+      "domains": ["intent", "reasoning", "memory", "uncertainty", "debugging"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-frontier-chatgpt-mcp-amendment.md",
+      "source_hash": "c8e083f716e776d79408b183280442638e5ccc02",
+      "status": "approved_with_later_correction",
+      "domains": ["frontier_models", "chatgpt", "mcp"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-desktop-intelligence-corrective-amendment.md",
+      "source_hash": "ae11ebf84704eb6d0f51c6fd0c91104b0893a55c",
+      "status": "approved_corrective",
+      "domains": ["desktop", "zero_cost", "chatgpt_plus", "shutdown"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-zero-cost-intelligence-mesh-amendment.md",
+      "source_hash": "13ca9a79c9641401fd9c67449ce940b86a6599ad",
+      "status": "approved",
+      "domains": ["providers", "zero_cost", "multi_model"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-frontier-routing-seamless-handoff-amendment.md",
+      "source_hash": "2b42d1a8592bbbd3870c3ff6cfa87c0f30dda49d",
+      "status": "approved",
+      "domains": ["routing", "provider_discovery", "handoff", "continuity"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-adaptive-frontier-fabric-routing-stability-amendment.md",
+      "source_hash": "8cf794c2c23d476e2eafd7916bf3a268ae077c61",
+      "status": "approved",
+      "domains": ["capability_routing", "task_affinity", "switch_hysteresis", "cost_proof"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-frontier-autopilot-control-plane-hardening-amendment.md",
+      "source_hash": "97a80bf9418ed03cef1223831a15da78b1ee909b",
+      "status": "approved",
+      "domains": ["frontier_autopilot", "billing_guard", "control_plane", "identity", "quota"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-self-optimizing-frontier-hunter-seamless-failover-amendment.md",
+      "source_hash": "7d59c05e29f44f6b7d6385cb4903921a7f52a0cd",
+      "status": "approved",
+      "domains": ["frontier_hunter", "self_optimization", "failover"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-provider-fabric-live-oracle-amendment.md",
+      "source_hash": "8a97a82078b0b217641a345861c68a7c23b8a60f",
+      "status": "approved",
+      "domains": ["provider_fabric", "live_oracle", "freshness"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-frontier-oracle-ood-certified-continuity-amendment.md",
+      "source_hash": "be94e26bf79a2c902f705d89922343e0d16866fb",
+      "status": "approved",
+      "domains": ["oracle", "ood", "continuity", "certification"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-frontier-capacity-orchestration-fenced-continuity-amendment.md",
+      "source_hash": "f7023496b49d8cd6f768bf75ac4fd260c3cb0ca8",
+      "status": "approved",
+      "domains": ["capacity", "orchestration", "fencing", "continuity"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-frontier-marketplace-resilience-amendment.md",
+      "source_hash": "4b91c7a1d7881e8e2782f09293c7c03abd6b2bc1",
+      "status": "approved",
+      "domains": ["marketplace", "provider_resilience", "discovery"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-runtime-verification-recovery-security-self-improvement-amendment.md",
+      "source_hash": "f47daf2c021c9f81fd79ef1a78b8307e0c28488e",
+      "status": "approved",
+      "domains": ["runtime", "verification", "recovery", "security", "self_improvement"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-operational-trust-durable-recovery-amendment.md",
+      "source_hash": "4947f9e8f5ac5a0b9b0b56efc817083c51cd3b08",
+      "status": "approved",
+      "domains": ["operational_trust", "durable_recovery"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-delegation-plan-freshness-secret-mediation-safe-recovery-amendment.md",
+      "source_hash": "666739d564d6205ba6e4f7258474d9dad662e70a",
+      "status": "approved",
+      "domains": ["delegation", "plan_freshness", "secret_mediation", "recovery"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-transactional-evidence-formal-assurance-provenance-bayesian-control-amendment.md",
+      "source_hash": "1f13c5bc68d3c2625b2919dc6736bccffe401e59",
+      "status": "approved",
+      "domains": ["transactional_evidence", "formal_assurance", "provenance", "bayesian_control"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-dual-executable-contracts-verifier-coevolution-architecture-immunity-core-evolution-amendment.md",
+      "source_hash": "1a1eec59bb0cc0ac1ff6c9ac9a1f45db23387f90",
+      "status": "approved",
+      "domains": ["executable_contracts", "verifier_coevolution", "architecture_immunity", "core_evolution"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-semantic-transactions-isolation-evaluation-integrity-amendment.md",
+      "source_hash": "30ed8f1181df4a202b5c18d3009acb7cf17865a6",
+      "status": "approved",
+      "domains": ["semantic_transactions", "isolation", "evaluation_integrity"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-pre-persistence-governance-memory-integrity-amendment.md",
+      "source_hash": "15ce41e4fd580fb89b0e15fd59eb7ef84c01de9a",
+      "status": "approved",
+      "domains": ["authority", "effects", "pre_persistence", "memory_integrity", "taint"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-spec-constitution-compiler-traceability-amendment.md",
+      "source_hash": "6d25d9b720d60abc8bf4d90c9260efd9dcc26995",
+      "status": "approved_governance",
+      "domains": ["spec_governance", "compiler", "traceability", "precedence"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-conversational-grounding-intent-mediation-unified-desktop-amendment.md",
+      "source_hash": "081ad0678c5afc0bd4e44f0b63018c6ec909e816",
+      "status": "approved",
+      "domains": ["conversation", "grounding", "intent_mediation", "desktop"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-common-ground-playback-streaming-conversation-intelligence-amendment.md",
+      "source_hash": "ca120745b56a3c045e8282abdbb66d987a456539",
+      "status": "approved",
+      "domains": ["common_ground", "playback", "streaming", "voice", "repair"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-autonomous-software-engineering-intelligence-assurance-evolution-amendment.md",
+      "source_hash": "50c65709ca48e8b2558e011213b28a5ca2300ec5",
+      "status": "approved",
+      "domains": ["software_engineering", "assurance", "long_horizon", "evolution"]
+    },
+    {
+      "path": "docs/superpowers/specs/2026-09-04-alinacoder-v0.2-validated-consolidated-spec.md",
+      "source_hash": "29610123715ca7f0970908f2ec32363fd023bdb9",
+      "status": "validated_current_view",
+      "domains": ["all_active_domains", "conversation_context", "clarification_regret", "artifact_anchors", "correction_enforcement", "release_readiness"]
+    }
+  ],
+  "readiness": {
+    "SPEC_READY": true,
+    "IMPLEMENTATION_READY": "not_yet_proven",
+    "RUNTIME_ALPHA_READY": false,
+    "RUNTIME_V0_2_READY": false
+  }
+}
