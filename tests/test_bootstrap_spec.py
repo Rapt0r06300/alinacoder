@@ -35,7 +35,7 @@ class BootstrapSpecTests(unittest.TestCase):
             (root / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
             result = SpecCompiler(root).compile(root / "manifest.json")
             self.assertTrue(result.valid)
-            self.assertEqual(result.current_spec_path, spec_path)
+            self.assertTrue(result.current_spec_path.samefile(spec_path))
             self.assertEqual(result.invariants, tuple(manifest["constitutional_invariants"]))
 
     def test_spec_compiler_accepts_windows_crlf_for_git_lf_blob(self) -> None:
