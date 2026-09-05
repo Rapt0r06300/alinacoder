@@ -49,25 +49,14 @@ class RuleTraceabilityReport:
 
 class RuleTraceabilityBuilder:
     _DOMAIN_BY_FAMILY = {
-        "COST": "provider_fabric",
-        "GIT": "tools",
-        "INTENT": "conversation",
-        "STATE": "state_recovery",
-        "EFFECT": "security",
-        "VERIFY": "verification",
-        "MEMORY": "memory_repo",
-        "PROVIDER": "provider_fabric",
-        "RECOVERY": "state_recovery",
+        "COST": "provider_fabric", "GIT": "tools", "INTENT": "conversation",
+        "STATE": "state_recovery", "EFFECT": "security", "VERIFY": "verification",
+        "MEMORY": "memory_repo", "PROVIDER": "provider_fabric", "RECOVERY": "state_recovery",
         "SPEC": "bootstrap",
     }
     _EVIDENCE_BY_DOMAIN = {
-        "bootstrap": "core",
-        "state_recovery": "core",
-        "security": "core",
-        "memory_repo": "core",
-        "conversation": "desktop_e2e",
-        "provider_fabric": "core",
-        "tools": "desktop_e2e",
+        "bootstrap": "core", "state_recovery": "core", "security": "core", "memory_repo": "core",
+        "conversation": "desktop_e2e", "provider_fabric": "core", "tools": "desktop_e2e",
         "verification": "final_audit",
     }
 
@@ -169,11 +158,8 @@ class SpecAcceptanceMatrix:
         unknown_tuple = tuple(sorted(unknown))
         return SpecAcceptanceMatrixReport(
             passed=not missing and not invalid and not unknown_tuple,
-            missing=missing,
-            invalid=invalid,
-            unknown=unknown_tuple,
-            passed_cases=passed_cases,
-            required_cases=len(required),
+            missing=missing, invalid=invalid, unknown=unknown_tuple,
+            passed_cases=passed_cases, required_cases=len(required),
         )
 
 
@@ -204,10 +190,8 @@ class AcceptanceCoverageCatalog:
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         return tuple(
             AcceptanceCoverageRow(
-                case_id=str(item["case_id"]),
-                path=str(item["path"]),
-                test_name=str(item.get("test_name", "")),
-                evidence_key=str(item.get("evidence_key", "")),
+                case_id=str(item["case_id"]), path=str(item["path"]),
+                test_name=str(item.get("test_name", "")), evidence_key=str(item.get("evidence_key", "")),
             )
             for item in payload.get("cases", [])
         )
@@ -216,13 +200,23 @@ class AcceptanceCoverageCatalog:
         rows = self._rows()
         required = set(matrix.required_case_ids())
         counts: dict[str, int] = {}
-        invalid_paths: set[str] = set()
+        invalid: set[str] = set()
         for row in rows:
             counts[row.case_id] = counts.get(row.case_id, 0) + 1
-            if not (self.repo_root / row.path).exists() or not (row.test_name or row.evidence_key):
-                invalid_paths.add(row.case_id)
+            target = self.repo_root / row.path
+            if not target.exists() or not (row.test_name or row.evidence_key):
+                invalid.add(row.case_id)
+                continue
+            if row.test_name:
+                try:
+                    text = target.read_text(encoding="utf-8")
+                except (OSError, UnicodeError):
+                    invalid.add(row.case_id)
+                    continue
+                if f"def {row.test_name}(" not in text:
+                    invalid.add(row.case_id)
         known = {row.case_id for row in rows}
-        gaps = tuple(sorted((required - known) | invalid_paths))
+        gaps = tuple(sorted((required - known) | invalid))
         unknown = tuple(sorted(known - required))
         duplicates = tuple(sorted(case_id for case_id, count in counts.items() if count > 1))
         complete = not gaps and not unknown and not duplicates and len(known) == len(required)
@@ -334,15 +328,10 @@ def main(argv: list[str] | None = None) -> int:
     coverage = AcceptanceCoverageCatalog(args.repo_root).validate(matrix)
     report = {
         "runtime_v0_2_ready": False,
-        "bundle_complete": bundle.complete(),
-        "traceability_complete": traceability.complete,
-        "acceptance_coverage_complete": coverage.complete,
-        "acceptance_cases": len(matrix.required_case_ids()),
-        "rule_count": traceability.rule_count,
-        "unknown_rule_families": list(traceability.unknown_families),
-        "artifact_exists": artifact.exists(),
-        "setup_exists": setup.exists(),
-        "commit_sha": args.commit_sha,
+        "bundle_complete": bundle.complete(), "traceability_complete": traceability.complete,
+        "acceptance_coverage_complete": coverage.complete, "acceptance_cases": len(matrix.required_case_ids()),
+        "rule_count": traceability.rule_count, "unknown_rule_families": list(traceability.unknown_families),
+        "artifact_exists": artifact.exists(), "setup_exists": setup.exists(), "commit_sha": args.commit_sha,
     }
     if artifact.exists() and bundle.complete():
         report["artifact_sha256"] = sha256_file(artifact)
