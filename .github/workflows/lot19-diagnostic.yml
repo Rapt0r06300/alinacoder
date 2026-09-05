@@ -7,16 +7,17 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-signature-runtime:
+  diagnose-signature-suffix-winps:
     runs-on: windows-latest
     steps:
-      - name: Compare PowerShell runtimes for Authenticode
+      - name: Compare WinPS Authenticode with atomic temp suffix
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           $url = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe"
-          $file = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe"
-          Invoke-WebRequest -Uri $url -OutFile $file
-          Write-Host "PWSH_STATUS=$((Get-AuthenticodeSignature -LiteralPath $file).Status.ToString())"
-          & powershell.exe -NoProfile -NonInteractive -Command "`$s=(Get-AuthenticodeSignature -LiteralPath '$file'); Write-Output ('WINPS_STATUS=' + `$s.Status.ToString()); Write-Output ('WINPS_SUBJECT=' + `$s.SignerCertificate.Subject); exit 0"
-          Write-Host "WINPS_EXIT=$LASTEXITCODE"
+          $bad = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe.partial"
+          $good = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.partial.exe"
+          Invoke-WebRequest -Uri $url -OutFile $bad
+          Copy-Item $bad $good
+          & powershell.exe -NoProfile -NonInteractive -Command "Write-Output ('BAD_WINPS=' + (Get-AuthenticodeSignature -LiteralPath '$bad').Status.ToString()); Write-Output ('GOOD_WINPS=' + (Get-AuthenticodeSignature -LiteralPath '$good').Status.ToString())"
+          if ($LASTEXITCODE -ne 0) { throw "WinPS diagnostic failed" }
