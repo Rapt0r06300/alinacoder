@@ -16,6 +16,7 @@ from alinacoder.product.prerequisites import (
     PrerequisiteManifest,
 )
 from alinacoder.product.windows_trust import NativeWindowsBootstrapAdapter
+from alinacoder.tools.git import GitMainExecutor
 
 
 class Lot19MinGitBootstrapTests(unittest.TestCase):
@@ -73,7 +74,7 @@ class Lot19MinGitBootstrapTests(unittest.TestCase):
                 )
                 receipt = adapter.install_component("git", operation="install")
 
-            managed_git = local / "Programs" / "Git" / "cmd" / "git.exe"
+            managed_git = local / "Programs" / "AlinaCoder" / "Git" / "cmd" / "git.exe"
             self.assertTrue(managed_git.is_file())
             self.assertEqual(receipt.origin, "managed_by_alinacoder")
             self.assertEqual(receipt.source_url, asset_url)
@@ -81,11 +82,21 @@ class Lot19MinGitBootstrapTests(unittest.TestCase):
             self.assertTrue(all(Path(call[0]).name != asset_name for call in calls))
             self.assertTrue(any(Path(call[0]) == managed_git for call in calls))
 
+    def test_git_executor_resolves_alinacoder_managed_mingit_without_path_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            local = Path(td) / "LocalAppData"
+            managed_git = local / "Programs" / "AlinaCoder" / "Git" / "cmd" / "git.exe"
+            managed_git.parent.mkdir(parents=True)
+            managed_git.write_bytes(b"managed-git")
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}, clear=False):
+                executor = GitMainExecutor()
+            self.assertEqual(Path(executor.git_executable), managed_git)
+
     def test_explicit_purge_removes_managed_mingit_without_touching_other_programs(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             local = root / "LocalAppData"
-            git_root = local / "Programs" / "Git"
+            git_root = local / "Programs" / "AlinaCoder" / "Git"
             managed_git = git_root / "cmd" / "git.exe"
             managed_git.parent.mkdir(parents=True)
             managed_git.write_bytes(b"managed-git")
