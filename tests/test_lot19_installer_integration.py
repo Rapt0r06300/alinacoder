@@ -86,6 +86,34 @@ class Lot19InstallerLifecycleIntegrationTests(unittest.TestCase):
             self.assertTrue(metadata["bootstrap_ready"])
             self.assertEqual(metadata["selected_model"], "qwen3:0.6b")
 
+    def test_preexisting_dependency_keeps_user_ownership_after_upgrade(self) -> None:
+        original = p.InstalledComponent("ollama", "0.14.0", "pre_existing", "C:/User/Ollama/ollama.exe")
+        upgraded = p.ComponentReceipt(
+            "ollama", "0.33.3", "managed_by_alinacoder",
+            "https://github.com/ollama/ollama/releases/download/v0.33.3/OllamaSetup.exe",
+            "a" * 64, True,
+        )
+        state = p.BootstrapState({"ollama": upgraded}, "qwen3:0.6b", True)
+        report = p.BootstrapReport(True, "qwen3:0.6b", (), (), state)
+
+        class FakeAdapter:
+            def __init__(self): self.persisted = None
+            def detect_inventory(self): return p.ComponentInventory(None, original, frozenset())
+            def persist_report(self, value): self.persisted = value
+
+        class FakeBootstrapper:
+            def __init__(self): self.adapter = FakeAdapter()
+            def run(self, **kwargs): return report
+
+        fake = FakeBootstrapper()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "app.exe"
+            source.write_bytes(b"app")
+            installer.install(root / "dest", source_exe=source, bootstrapper=fake)
+        self.assertIsNotNone(fake.adapter.persisted)
+        self.assertEqual(fake.adapter.persisted.state.components["ollama"].origin, "pre_existing")
+
     def test_normal_uninstall_does_not_request_external_prerequisite_removal(self) -> None:
         class FakeBootstrapper:
             def managed_uninstall(self, purge=False):
