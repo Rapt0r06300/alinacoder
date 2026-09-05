@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
+import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -221,6 +223,71 @@ class AcceptanceCoverageCatalog:
         duplicates = tuple(sorted(case_id for case_id, count in counts.items() if count > 1))
         complete = not gaps and not unknown and not duplicates and len(known) == len(required)
         return AcceptanceCoverageReport(complete, rows, gaps, unknown, duplicates, len(known & required))
+
+
+class AcceptanceCatalogRunner:
+    """Executes the tests named by the acceptance catalog and binds external runtime evidence."""
+
+    def __init__(self, repo_root: Path | str, catalog_path: Path | str | None = None) -> None:
+        self.repo_root = Path(repo_root)
+        self.catalog_path = Path(catalog_path) if catalog_path is not None else self.repo_root / "docs/release/acceptance-coverage-v0.2.json"
+        self._module_cache: dict[Path, object] = {}
+
+    @staticmethod
+    def _iter_tests(suite: unittest.TestSuite):
+        for item in suite:
+            if isinstance(item, unittest.TestSuite):
+                yield from AcceptanceCatalogRunner._iter_tests(item)
+            else:
+                yield item
+
+    def _load_module(self, path: Path):
+        path = path.resolve()
+        cached = self._module_cache.get(path)
+        if cached is not None:
+            return cached
+        module_name = f"alinacoder_acceptance_{hashlib.sha256(str(path).encode('utf-8')).hexdigest()[:16]}"
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load acceptance test module: {path}")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self._module_cache[path] = module
+        return module
+
+    def _run_named_test(self, path: Path, test_name: str) -> tuple[bool, str]:
+        try:
+            module = self._load_module(path)
+            suite = unittest.defaultTestLoader.loadTestsFromModule(module)
+            matches = [test for test in self._iter_tests(suite) if getattr(test, "_testMethodName", "") == test_name]
+            if len(matches) != 1:
+                return False, f"sealed-ci:test:{path.as_posix()}#{test_name}:match-count={len(matches)}"
+            result = unittest.TestResult()
+            matches[0].run(result)
+            return result.wasSuccessful(), f"sealed-ci:test:{path.as_posix()}#{test_name}"
+        except Exception as exc:
+            return False, f"sealed-ci:test:{path.as_posix()}#{test_name}:error={type(exc).__name__}"
+
+    def run(self, *, external_evidence: dict[str, bool] | None = None) -> tuple[AcceptanceCaseEvidence, ...]:
+        payload = json.loads(self.catalog_path.read_text(encoding="utf-8"))
+        external_evidence = dict(external_evidence or {})
+        evidences: list[AcceptanceCaseEvidence] = []
+        for raw in payload.get("cases", []):
+            case_id = str(raw.get("case_id", ""))
+            relative = str(raw.get("path", ""))
+            test_name = str(raw.get("test_name", ""))
+            evidence_key = str(raw.get("evidence_key", ""))
+            if not case_id or not relative or not (test_name or evidence_key):
+                evidences.append(AcceptanceCaseEvidence(case_id or "<invalid>", "FAIL", True, "sealed-ci:invalid-catalog-row"))
+                continue
+            target = self.repo_root / relative
+            if test_name:
+                passed, source = self._run_named_test(target, test_name)
+            else:
+                passed = bool(external_evidence.get(evidence_key, False)) and target.exists()
+                source = f"sealed-ci:evidence:{evidence_key}"
+            evidences.append(AcceptanceCaseEvidence(case_id, "PASS" if passed else "FAIL", True, source))
+        return tuple(evidences)
 
 
 @dataclass(frozen=True)
