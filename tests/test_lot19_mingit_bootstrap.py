@@ -9,7 +9,12 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
-from alinacoder.product.prerequisites import PrerequisiteManifest
+from alinacoder.product.prerequisites import (
+    BootstrapReport,
+    BootstrapState,
+    ComponentReceipt,
+    PrerequisiteManifest,
+)
 from alinacoder.product.windows_trust import NativeWindowsBootstrapAdapter
 
 
@@ -75,6 +80,43 @@ class Lot19MinGitBootstrapTests(unittest.TestCase):
             self.assertEqual(receipt.sha256, digest)
             self.assertTrue(all(Path(call[0]).name != asset_name for call in calls))
             self.assertTrue(any(Path(call[0]) == managed_git for call in calls))
+
+    def test_explicit_purge_removes_managed_mingit_without_touching_other_programs(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            local = root / "LocalAppData"
+            git_root = local / "Programs" / "Git"
+            managed_git = git_root / "cmd" / "git.exe"
+            managed_git.parent.mkdir(parents=True)
+            managed_git.write_bytes(b"managed-git")
+            other = local / "Programs" / "UserTool" / "keep.txt"
+            other.parent.mkdir(parents=True)
+            other.write_text("keep", encoding="utf-8")
+            state_dir = root / "AlinaCoder"
+            state = BootstrapState(
+                {
+                    "git": ComponentReceipt(
+                        "git",
+                        "2.55.0.5",
+                        "managed_by_alinacoder",
+                        "https://github.com/git-for-windows/git/releases/download/"
+                        "v2.55.0.windows.5/MinGit-2.55.0.5-64-bit.zip",
+                        "a" * 64,
+                        True,
+                        path=str(managed_git),
+                    )
+                },
+                "qwen3:0.6b",
+                True,
+            )
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}, clear=False):
+                adapter = NativeWindowsBootstrapAdapter(state_dir, self.manifest, sleep=lambda _: None)
+                adapter.persist_report(BootstrapReport(True, "qwen3:0.6b", (), (), state))
+                removed = adapter.managed_uninstall(purge=True)
+
+            self.assertEqual(removed, ("git",))
+            self.assertFalse(git_root.exists())
+            self.assertTrue(other.is_file())
 
 
 if __name__ == "__main__":
