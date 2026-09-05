@@ -33,6 +33,11 @@ class Lot19ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("lot19-bootstrap-evidence.json", workflow)
         self.assertIn("verify_lot19_bootstrap.py", workflow)
 
+    def test_preexisting_model_assertion_treats_ollama_list_as_one_text_block(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        self.assertIn('$modelsAfterText = ($modelsAfter -join "`n")', workflow)
+        self.assertNotIn("($modelsAfter -notmatch 'qwen3:0.6b')", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
