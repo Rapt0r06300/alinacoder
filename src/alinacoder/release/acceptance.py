@@ -48,8 +48,6 @@ class RuleTraceabilityReport:
 
 
 class RuleTraceabilityBuilder:
-    """Build traceability for the constitutional rules declared active by the normative manifest."""
-
     _DOMAIN_BY_FAMILY = {
         "COST": "provider_fabric",
         "GIT": "tools",
@@ -62,7 +60,6 @@ class RuleTraceabilityBuilder:
         "RECOVERY": "state_recovery",
         "SPEC": "bootstrap",
     }
-
     _EVIDENCE_BY_DOMAIN = {
         "bootstrap": "core",
         "state_recovery": "core",
@@ -92,15 +89,7 @@ class RuleTraceabilityBuilder:
                 unknown.add(family or rule_id)
                 continue
             code_path, test_path = domains[domain]
-            rows.append(
-                TraceabilityRow(
-                    rule_id=rule_id,
-                    domain=domain,
-                    code_path=code_path,
-                    test_path=test_path,
-                    evidence_name=self._EVIDENCE_BY_DOMAIN[domain],
-                )
-            )
+            rows.append(TraceabilityRow(rule_id, domain, code_path, test_path, self._EVIDENCE_BY_DOMAIN[domain]))
         return RuleTraceabilityReport(tuple(rows), tuple(sorted(unknown)))
 
 
@@ -123,80 +112,40 @@ class SpecAcceptanceMatrixReport:
 
 
 class SpecAcceptanceMatrix:
-    """Executable representation of the complete v0.2 section-18 acceptance matrix."""
-
     families: dict[str, tuple[str, ...]] = {
         "conversation": (
-            "evolving_intent",
-            "correction_negation",
-            "branch_isolation",
-            "deictic_visible_references",
-            "clarification_stopping",
-            "user_preference_revision",
-            "repeated_correction_no_repeat_violation",
+            "evolving_intent", "correction_negation", "branch_isolation", "deictic_visible_references",
+            "clarification_stopping", "user_preference_revision", "repeated_correction_no_repeat_violation",
             "french_noisy_hesitant_input",
         ),
         "repository_engineering": (
-            "multi_file_bug_repair",
-            "feature_addition",
-            "dependency_sensitive_refactor",
-            "implicit_requirement_recovery",
-            "test_generation_use",
-            "regression_detection",
-            "partial_failure_recovery",
-            "long_horizon_no_premature_stop",
+            "multi_file_bug_repair", "feature_addition", "dependency_sensitive_refactor",
+            "implicit_requirement_recovery", "test_generation_use", "regression_detection",
+            "partial_failure_recovery", "long_horizon_no_premature_stop",
         ),
         "control_safety": (
-            "stale_response_rejection",
-            "cancellation_fencing",
-            "stale_patch_rejection",
-            "effect_idempotency",
-            "untrusted_repo_instructions_are_data",
-            "memory_promotion_governance",
-            "exact_main_enforcement",
+            "stale_response_rejection", "cancellation_fencing", "stale_patch_rejection", "effect_idempotency",
+            "untrusted_repo_instructions_are_data", "memory_promotion_governance", "exact_main_enforcement",
         ),
         "provider_fabric": (
-            "free_route_disappears",
-            "quota_exhausted",
-            "model_alias_changes",
-            "provider_timeout",
-            "same_lineage_failover",
-            "cognitive_failover",
-            "no_eligible_cloud_route",
-            "local_only_fallback",
+            "free_route_disappears", "quota_exhausted", "model_alias_changes", "provider_timeout",
+            "same_lineage_failover", "cognitive_failover", "no_eligible_cloud_route", "local_only_fallback",
             "zero_paid_calls",
         ),
         "continuity": (
-            "process_crash",
-            "restart_during_mission",
-            "model_switch",
-            "user_correction_in_flight",
-            "partial_stream_failure",
-            "recovery_without_duplicate_effect",
+            "process_crash", "restart_during_mission", "model_switch", "user_correction_in_flight",
+            "partial_stream_failure", "recovery_without_duplicate_effect",
         ),
         "desktop_ux": (
-            "clean_first_run",
-            "ordinary_chat_without_advanced_panels",
-            "pause_resume",
-            "all_stop",
-            "plan_artifact_selection",
-            "targeted_edit_continue",
-            "verification_visibility",
-            "low_idle_resource_use",
+            "clean_first_run", "ordinary_chat_without_advanced_panels", "pause_resume", "all_stop",
+            "plan_artifact_selection", "targeted_edit_continue", "verification_visibility", "low_idle_resource_use",
         ),
     }
 
     def required_case_ids(self) -> tuple[str, ...]:
-        return tuple(
-            f"{family}.{case}"
-            for family, cases in self.families.items()
-            for case in cases
-        )
+        return tuple(f"{family}.{case}" for family, cases in self.families.items() for case in cases)
 
-    def evaluate(
-        self,
-        evidences: list[AcceptanceCaseEvidence] | tuple[AcceptanceCaseEvidence, ...],
-    ) -> SpecAcceptanceMatrixReport:
+    def evaluate(self, evidences: list[AcceptanceCaseEvidence] | tuple[AcceptanceCaseEvidence, ...]) -> SpecAcceptanceMatrixReport:
         required = self.required_case_ids()
         required_set = set(required)
         by_case: dict[str, AcceptanceCaseEvidence] = {}
@@ -208,18 +157,14 @@ class SpecAcceptanceMatrix:
             by_case[evidence.case_id] = evidence
         missing = tuple(case_id for case_id in required if case_id not in by_case)
         invalid = tuple(
-            case_id
-            for case_id in required
-            if case_id in by_case
-            and (by_case[case_id].verdict != "PASS" or not by_case[case_id].fresh or not by_case[case_id].source)
+            case_id for case_id in required
+            if case_id in by_case and (
+                by_case[case_id].verdict != "PASS" or not by_case[case_id].fresh or not by_case[case_id].source
+            )
         )
         passed_cases = sum(
-            1
-            for case_id in required
-            if case_id in by_case
-            and by_case[case_id].verdict == "PASS"
-            and by_case[case_id].fresh
-            and bool(by_case[case_id].source)
+            1 for case_id in required
+            if case_id in by_case and by_case[case_id].verdict == "PASS" and by_case[case_id].fresh and by_case[case_id].source
         )
         unknown_tuple = tuple(sorted(unknown))
         return SpecAcceptanceMatrixReport(
@@ -230,6 +175,58 @@ class SpecAcceptanceMatrix:
             passed_cases=passed_cases,
             required_cases=len(required),
         )
+
+
+@dataclass(frozen=True)
+class AcceptanceCoverageRow:
+    case_id: str
+    path: str
+    test_name: str = ""
+    evidence_key: str = ""
+
+
+@dataclass(frozen=True)
+class AcceptanceCoverageReport:
+    complete: bool
+    rows: tuple[AcceptanceCoverageRow, ...]
+    gaps: tuple[str, ...]
+    unknown: tuple[str, ...]
+    duplicates: tuple[str, ...]
+    covered_cases: int
+
+
+class AcceptanceCoverageCatalog:
+    def __init__(self, repo_root: Path | str, relative_path: str = "docs/release/acceptance-coverage-v0.2.json") -> None:
+        self.repo_root = Path(repo_root)
+        self.path = self.repo_root / relative_path
+
+    def _rows(self) -> tuple[AcceptanceCoverageRow, ...]:
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
+        return tuple(
+            AcceptanceCoverageRow(
+                case_id=str(item["case_id"]),
+                path=str(item["path"]),
+                test_name=str(item.get("test_name", "")),
+                evidence_key=str(item.get("evidence_key", "")),
+            )
+            for item in payload.get("cases", [])
+        )
+
+    def validate(self, matrix: SpecAcceptanceMatrix) -> AcceptanceCoverageReport:
+        rows = self._rows()
+        required = set(matrix.required_case_ids())
+        counts: dict[str, int] = {}
+        invalid_paths: set[str] = set()
+        for row in rows:
+            counts[row.case_id] = counts.get(row.case_id, 0) + 1
+            if not (self.repo_root / row.path).exists() or not (row.test_name or row.evidence_key):
+                invalid_paths.add(row.case_id)
+        known = {row.case_id for row in rows}
+        gaps = tuple(sorted((required - known) | invalid_paths))
+        unknown = tuple(sorted(known - required))
+        duplicates = tuple(sorted(case_id for case_id, count in counts.items() if count > 1))
+        complete = not gaps and not unknown and not duplicates and len(known) == len(required)
+        return AcceptanceCoverageReport(complete, rows, gaps, unknown, duplicates, len(known & required))
 
 
 @dataclass(frozen=True)
@@ -271,16 +268,7 @@ class FinalAcceptanceResult:
 
 
 class FinalAcceptanceGate:
-    """Fail-closed release gate requiring exact-state evidence and an independent final audit."""
-
-    def __init__(
-        self,
-        traceability: RuleTraceabilityReport,
-        required: tuple[str, ...] | set[str],
-        *,
-        commit_sha: str,
-        artifact_sha256: str,
-    ) -> None:
+    def __init__(self, traceability: RuleTraceabilityReport, required: tuple[str, ...] | set[str], *, commit_sha: str, artifact_sha256: str) -> None:
         self.traceability = traceability
         self.required = tuple(required)
         self.commit_sha = commit_sha
@@ -295,11 +283,8 @@ class FinalAcceptanceGate:
         for name in self.required:
             evidence = by_name.get(name)
             valid = bool(
-                evidence
-                and evidence.verdict == "PASS"
-                and evidence.fresh
-                and evidence.commit_sha == self.commit_sha
-                and evidence.artifact_sha256 == self.artifact_sha256
+                evidence and evidence.verdict == "PASS" and evidence.fresh
+                and evidence.commit_sha == self.commit_sha and evidence.artifact_sha256 == self.artifact_sha256
             )
             if not valid:
                 missing.append(name)
@@ -312,12 +297,8 @@ class FinalAcceptanceGate:
 
 class ReleaseBundle:
     REQUIRED = {
-        "AlinaCoder.exe",
-        "AlinaCoderSetup.exe",
-        "release-manifest.json",
-        "sbom.spdx.json",
-        "USER_GUIDE.md",
-        "OPERATIONS.md",
+        "AlinaCoder.exe", "AlinaCoderSetup.exe", "release-manifest.json", "sbom.spdx.json",
+        "USER_GUIDE.md", "OPERATIONS.md",
     }
 
     def __init__(self, files: set[str]) -> None:
@@ -349,10 +330,14 @@ def main(argv: list[str] | None = None) -> int:
             files.add(doc)
     bundle = ReleaseBundle(files)
     traceability = RuleTraceabilityBuilder(args.repo_root).build()
+    matrix = SpecAcceptanceMatrix()
+    coverage = AcceptanceCoverageCatalog(args.repo_root).validate(matrix)
     report = {
         "runtime_v0_2_ready": False,
         "bundle_complete": bundle.complete(),
         "traceability_complete": traceability.complete,
+        "acceptance_coverage_complete": coverage.complete,
+        "acceptance_cases": len(matrix.required_case_ids()),
         "rule_count": traceability.rule_count,
         "unknown_rule_families": list(traceability.unknown_families),
         "artifact_exists": artifact.exists(),
@@ -362,7 +347,7 @@ def main(argv: list[str] | None = None) -> int:
     if artifact.exists() and bundle.complete():
         report["artifact_sha256"] = sha256_file(artifact)
     print(json.dumps(report, sort_keys=True))
-    return 0 if bundle.complete() and artifact.exists() and setup.exists() and traceability.complete else 2
+    return 0 if bundle.complete() and artifact.exists() and setup.exists() and traceability.complete and coverage.complete else 2
 
 
 if __name__ == "__main__":
