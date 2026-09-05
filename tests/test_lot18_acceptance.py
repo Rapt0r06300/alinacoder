@@ -9,6 +9,7 @@ class Lot18AcceptanceTests(unittest.TestCase):
   self.assertTrue(g.runtime_v0_2_ready())
  def test_stale_or_wrong_commit_evidence_is_rejected(self):
   g=AcceptanceGate(required={'tests'},commit_sha='new',artifact_sha256='hash');g.add(AcceptanceEvidence('tests','PASS','old','hash',True));self.assertFalse(g.runtime_v0_2_ready())
- def test_release_bundle_requires_exe_setup_manifest_sbom_and_docs(self):
-  self.assertTrue(ReleaseBundle({'AlinaCoder.exe','AlinaCoderSetup.exe','release-manifest.json','sbom.spdx.json','USER_GUIDE.md','OPERATIONS.md'}).complete());self.assertFalse(ReleaseBundle({'AlinaCoder.exe'}).complete())
+ def test_release_bundle_requires_exe_setup_manifest_sbom_docs_and_prerequisite_policy(self):
+  required={'AlinaCoder.exe','AlinaCoderSetup.exe','release-manifest.json','sbom.spdx.json','USER_GUIDE.md','OPERATIONS.md','prerequisites-v0.2.json'}
+  self.assertTrue(ReleaseBundle(required).complete());self.assertFalse(ReleaseBundle({'AlinaCoder.exe'}).complete())
 if __name__=='__main__':unittest.main()
