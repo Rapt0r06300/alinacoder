@@ -1,0 +1,56 @@
+{
+  "version": "0.2",
+  "cases": [
+    {"case_id":"conversation.evolving_intent","path":"tests/test_lot06_conversation.py","test_name":"test_twenty_turn_repairs_preserve_latest_intent_and_unrelated_verified_work"},
+    {"case_id":"conversation.correction_negation","path":"tests/test_lot06_conversation.py","test_name":"test_twenty_turn_repairs_preserve_latest_intent_and_unrelated_verified_work"},
+    {"case_id":"conversation.branch_isolation","path":"tests/test_lot06_10_completion_audit.py","test_name":"test_context_branches_and_repairs_do_not_pollute_main"},
+    {"case_id":"conversation.deictic_visible_references","path":"tests/test_lot06_conversation.py","test_name":"test_artifact_anchor_resolves_that_and_ambiguity_requires_clarification"},
+    {"case_id":"conversation.clarification_stopping","path":"tests/test_lot06_conversation.py","test_name":"test_clarification_regret_asks_only_when_expected_error_cost_dominates"},
+    {"case_id":"conversation.user_preference_revision","path":"tests/test_lot06_conversation.py","test_name":"test_preference_can_only_be_promoted_from_user_origin"},
+    {"case_id":"conversation.repeated_correction_no_repeat_violation","path":"tests/test_lot06_conversation.py","test_name":"test_twenty_turn_repairs_preserve_latest_intent_and_unrelated_verified_work"},
+    {"case_id":"conversation.french_noisy_hesitant_input","path":"tests/test_lot06_conversation.py","test_name":"test_raw_and_meaning_are_both_preserved_for_noisy_french"},
+
+    {"case_id":"repository_engineering.multi_file_bug_repair","path":"tests/test_lot09_engineering.py","test_name":"test_change_impact_simulator_computes_transitive_blast_radius_and_tests"},
+    {"case_id":"repository_engineering.feature_addition","path":"tests/test_lot14_16_acceptance_hardening.py","test_name":"test_conversation_goal_diff_tests_commit_and_restart_use_canonical_state"},
+    {"case_id":"repository_engineering.dependency_sensitive_refactor","path":"tests/test_lot04_lot05_completion.py","test_name":"test_data_flow_and_test_impact_are_available_from_repository_graph"},
+    {"case_id":"repository_engineering.implicit_requirement_recovery","path":"tests/test_lot09_engineering.py","test_name":"test_requirement_graph_separates_requirements_assumptions_and_unknowns"},
+    {"case_id":"repository_engineering.test_generation_use","path":"tests/test_lot14_16_acceptance_hardening.py","test_name":"test_conversation_goal_diff_tests_commit_and_restart_use_canonical_state"},
+    {"case_id":"repository_engineering.regression_detection","path":"tests/test_lot06_10_completion_audit.py","test_name":"test_semantic_regression_migration_evidence_and_self_correction"},
+    {"case_id":"repository_engineering.partial_failure_recovery","path":"tests/test_state_recovery.py","test_name":"test_effect_intent_is_idempotent_and_pending_effects_recover"},
+    {"case_id":"repository_engineering.long_horizon_no_premature_stop","path":"tests/test_goal_engine.py","test_name":"test_stagnation_triggers_replan_instead_of_repeat"},
+
+    {"case_id":"control_safety.stale_response_rejection","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_continuity_envelope_and_stale_response_gate"},
+    {"case_id":"control_safety.cancellation_fencing","path":"tests/test_state_recovery.py","test_name":"test_stale_writer_and_stale_version_are_rejected"},
+    {"case_id":"control_safety.stale_patch_rejection","path":"tests/test_lot09_engineering.py","test_name":"test_candidate_patch_and_architecture_fitness_fail_closed"},
+    {"case_id":"control_safety.effect_idempotency","path":"tests/test_security_kernel.py","test_name":"test_effect_key_prevents_duplicate_effect"},
+    {"case_id":"control_safety.untrusted_repo_instructions_are_data","path":"tests/test_security_kernel.py","test_name":"test_untrusted_prompt_cannot_escalate_to_privileged_effect"},
+    {"case_id":"control_safety.memory_promotion_governance","path":"tests/test_lot04_lot05_completion.py","test_name":"test_skillbook_is_project_scoped_and_promotes_only_verified_experience"},
+    {"case_id":"control_safety.exact_main_enforcement","path":"tests/test_lot08_tools.py","test_name":"test_git_executor_allows_main_only_and_reconciles_unknown_result"},
+
+    {"case_id":"provider_fabric.free_route_disappears","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_price_change_quarantines_route_before_next_call"},
+    {"case_id":"provider_fabric.quota_exhausted","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_quota_exhaustion_fails_over"},
+    {"case_id":"provider_fabric.model_alias_changes","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_router_matches_capability_not_model_name"},
+    {"case_id":"provider_fabric.provider_timeout","path":"tests/test_lot06_10_completion_audit.py","test_name":"test_circuit_breaker_and_switch_hysteresis_prevent_thrashing"},
+    {"case_id":"provider_fabric.same_lineage_failover","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_same_lineage_host_failover_is_preferred_when_current_host_unhealthy"},
+    {"case_id":"provider_fabric.cognitive_failover","path":"tests/test_lot11_13_acceptance_hardening.py","test_name":"test_specialist_selection_prefers_independent_failure_domains"},
+    {"case_id":"provider_fabric.no_eligible_cloud_route","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_only_exact_fresh_proven_zero_cost_route_is_admissible"},
+    {"case_id":"provider_fabric.local_only_fallback","path":"tests/test_lot13_resources.py","test_name":"test_selects_strongest_local_model_that_fits"},
+    {"case_id":"provider_fabric.zero_paid_calls","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_only_exact_fresh_proven_zero_cost_route_is_admissible"},
+
+    {"case_id":"continuity.process_crash","path":"tests/test_state_recovery.py","test_name":"test_state_is_reconstructible_and_evidence_becomes_stale_after_change"},
+    {"case_id":"continuity.restart_during_mission","path":"tests/test_goal_engine.py","test_name":"test_goal_persists_across_restart_and_plan_replacement_preserves_progress"},
+    {"case_id":"continuity.model_switch","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_continuity_envelope_and_stale_response_gate"},
+    {"case_id":"continuity.user_correction_in_flight","path":"tests/test_lot06_10_completion_audit.py","test_name":"test_partial_stream_never_authorizes_mutation_and_prefetch_stays_read_only"},
+    {"case_id":"continuity.partial_stream_failure","path":"tests/test_lot06_10_completion_audit.py","test_name":"test_partial_stream_never_authorizes_mutation_and_prefetch_stays_read_only"},
+    {"case_id":"continuity.recovery_without_duplicate_effect","path":"tests/test_state_recovery.py","test_name":"test_effect_intent_is_idempotent_and_pending_effects_recover"},
+
+    {"case_id":"desktop_ux.clean_first_run","path":".github/workflows/ci.yml","evidence_key":"windows.clean_install"},
+    {"case_id":"desktop_ux.ordinary_chat_without_advanced_panels","path":"src/alinacoder/desktop/app.py","evidence_key":"desktop.semantic_ui"},
+    {"case_id":"desktop_ux.pause_resume","path":"tests/test_lot14_16_acceptance_hardening.py","test_name":"test_pause_resume_stop_takeover_are_canonical_and_survive_restart"},
+    {"case_id":"desktop_ux.all_stop","path":"tests/test_lot14_desktop.py","test_name":"test_stop_pause_resume_takeover_change_backend_control_state"},
+    {"case_id":"desktop_ux.plan_artifact_selection","path":"src/alinacoder/desktop/core.py","evidence_key":"desktop.semantic_ui"},
+    {"case_id":"desktop_ux.targeted_edit_continue","path":"tests/test_goal_engine.py","test_name":"test_pause_resume_edit_cancel_and_minimal_invalidation"},
+    {"case_id":"desktop_ux.verification_visibility","path":"src/alinacoder/desktop/core.py","evidence_key":"desktop.semantic_ui"},
+    {"case_id":"desktop_ux.low_idle_resource_use","path":"tests/test_lot11_13_acceptance_hardening.py","test_name":"test_versioned_performance_budget_rejects_runtime_regression"}
+  ]
+}
