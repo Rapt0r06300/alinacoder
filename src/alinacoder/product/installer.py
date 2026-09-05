@@ -8,9 +8,11 @@ import shutil
 import sys
 from typing import Any
 
+from .prerequisite_lifecycle import bind_previous_provenance, rollback_managed
 from .prerequisites import (
     BootstrapError,
     BootstrapReport,
+    BootstrapState,
     PrerequisiteBootstrapper,
     PrerequisiteManifest,
     WindowsBootstrapAdapter,
@@ -141,6 +143,14 @@ def repair(
     )
 
 
+def _load_bootstrap_state(bootstrapper: Any | None) -> BootstrapState | None:
+    adapter = getattr(bootstrapper, "adapter", None)
+    load_state = getattr(adapter, "load_state", None)
+    if not callable(load_state):
+        return None
+    return load_state()
+
+
 def upgrade(
     install_dir: Path,
     source_exe: Path | None = None,
@@ -150,7 +160,8 @@ def upgrade(
     online: bool = True,
     model: str | None = None,
 ) -> Path:
-    return install(
+    previous_state = _load_bootstrap_state(bootstrapper)
+    target = install(
         Path(install_dir),
         source_exe=source_exe,
         operation="upgrade",
@@ -159,6 +170,53 @@ def upgrade(
         online=online,
         model=model,
     )
+    adapter = getattr(bootstrapper, "adapter", None)
+    if adapter is not None and previous_state is not None:
+        bind_previous_provenance(adapter, previous_state)
+    return target
+
+
+def rollback(
+    install_dir: Path,
+    *,
+    bootstrapper: Any | None = None,
+) -> tuple[str, ...]:
+    install_dir = Path(install_dir)
+    bootstrapper = bootstrapper or build_bootstrapper(install_dir)
+    adapter = getattr(bootstrapper, "adapter", None)
+    if adapter is None:
+        raise BootstrapError("rollback requires a Windows bootstrap adapter")
+    state = _load_bootstrap_state(bootstrapper)
+    if state is None:
+        raise BootstrapError("no bootstrap state available for rollback")
+    restored = rollback_managed(adapter, state)
+    if not restored:
+        raise BootstrapError("no provenance-bound managed prerequisite rollback target is available")
+    inventory = adapter.detect_inventory()
+    components = dict(state.components)
+    for name in restored:
+        current = inventory.git if name == "git" else inventory.ollama
+        previous = components.get(name)
+        if current is None or previous is None:
+            raise BootstrapError(f"rollback verification failed for {name}")
+        components[name] = type(previous)(
+            name=name,
+            version=current.version,
+            origin="managed_by_alinacoder",
+            source_url=previous.previous_source_url,
+            sha256=previous.previous_sha256,
+            healthy=True,
+            path=current.path,
+        )
+    ready = bool(adapter.ollama_ready(bootstrapper.manifest.ollama.endpoint))
+    rebound = BootstrapState(components, state.selected_model, ready, () if ready else ("ollama_health",))
+    adapter._atomic_write_json(adapter.state_path, rebound.as_dict())
+    report = BootstrapReport(ready, rebound.selected_model, (), rebound.pending, rebound)
+    adapter.persist_report(report)
+    _write_metadata(install_dir, operation="rollback", report=report)
+    if not ready:
+        raise BootstrapError("rollback completed but Ollama health check failed")
+    return restored
 
 
 def uninstall(
@@ -197,6 +255,7 @@ def main(argv: list[str] | None = None) -> int:
     actions.add_argument("--uninstall", action="store_true")
     actions.add_argument("--repair", action="store_true")
     actions.add_argument("--upgrade", action="store_true")
+    actions.add_argument("--rollback", action="store_true")
     actions.add_argument("--bootstrap-only", action="store_true")
     parser.add_argument("--purge-user-data", action="store_true")
     parser.add_argument("--purge-managed-prerequisites", action="store_true")
@@ -217,6 +276,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             if not args.quiet:
                 print(f"Uninstalled AlinaCoder from {args.install_dir}")
+        elif args.rollback:
+            restored = rollback(args.install_dir, bootstrapper=bootstrapper)
+            if not args.quiet:
+                print("Rolled back managed prerequisites: " + ", ".join(restored))
         elif args.bootstrap_only:
             report = _run_bootstrap_only(args.install_dir, online=not args.offline, model=args.model)
             if not report.ready:
@@ -247,14 +310,23 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Upgraded AlinaCoder at {target}")
         else:
             operation = "upgrade" if (args.install_dir / "AlinaCoder.exe").exists() else "install"
-            target = install(
-                args.install_dir,
-                operation=operation,
-                bootstrapper=bootstrapper,
-                deferred_prerequisites=args.deferred_prerequisites,
-                online=not args.offline,
-                model=args.model,
-            )
+            if operation == "upgrade":
+                target = upgrade(
+                    args.install_dir,
+                    bootstrapper=bootstrapper,
+                    deferred_prerequisites=args.deferred_prerequisites,
+                    online=not args.offline,
+                    model=args.model,
+                )
+            else:
+                target = install(
+                    args.install_dir,
+                    operation=operation,
+                    bootstrapper=bootstrapper,
+                    deferred_prerequisites=args.deferred_prerequisites,
+                    online=not args.offline,
+                    model=args.model,
+                )
             if not args.quiet:
                 print(f"Installed AlinaCoder to {target}")
         return 0
