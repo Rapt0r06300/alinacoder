@@ -138,18 +138,28 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
         return bool(switches.intersection({"/VERYSILENT", "/SILENT"}))
 
     def _default_command_runner(self, args: list[str], *, timeout: int = 300) -> tuple[int, str]:
-        """Run official GUI installers without inheritable output pipes.
+        """Run Windows bootstrap commands with bounded, locale-safe I/O.
 
-        Inno Setup launchers can hand work to a temporary child process. Captured
-        stdout/stderr handles may remain inherited by that child after the launcher
-        exits, causing ``subprocess.run(..., PIPE)`` to wait for EOF indefinitely.
-        GUI installers have no machine-consumed stdout contract, so route all three
-        standard handles to DEVNULL and rely on exit code plus post-install inventory.
-        Other commands retain the base captured-output behavior.
+        GUI installers are detached from captured pipes because Inno Setup launchers
+        may hand work to temporary children that keep those handles open. CLI tools
+        retain captured output, but decode explicitly as UTF-8 with replacement so
+        progress glyphs or locale-specific bytes can never crash the bootstrap.
+        Exit codes remain authoritative and are never masked by decoding fallback.
         """
 
         if not self._is_silent_installer(args):
-            return super()._default_command_runner(args, timeout=timeout)
+            completed = subprocess.run(
+                args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+                check=False,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return int(completed.returncode), completed.stdout or ""
 
         process = subprocess.Popen(
             args,
