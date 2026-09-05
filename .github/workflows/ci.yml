@@ -3,8 +3,13 @@ on:
   push:
     branches: [main]
   pull_request:
+
 permissions:
   contents: read
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+
 jobs:
   core:
     runs-on: windows-latest
@@ -12,8 +17,8 @@ jobs:
       matrix:
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Compile sources
@@ -29,32 +34,66 @@ jobs:
         env:
           PYTHONPATH: src
         run: python -m alinacoder.cli spec-compile --root .
+
   package-windows:
+    if: github.event_name == 'push'
     needs: core
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      - name: Install pinned packager
+      - name: Install pinned packager closure
         shell: pwsh
-        run: python -m pip install pyinstaller==6.16.0
+        run: >-
+          python -m pip install --disable-pip-version-check
+          pyinstaller==6.16.0
+          pyinstaller-hooks-contrib==2026.7
+          pefile==2023.2.7
+          pywin32-ctypes==0.2.3
+          altgraph==0.17.5
+          setuptools==84.0.0
+          packaging==26.3
       - name: Build Windows executables
         shell: pwsh
         env:
           PYTHONPATH: src
         run: python scripts/build_windows.py
-      - name: Generate provenance and SBOM
+      - name: Generate release manifest and SBOM
         shell: pwsh
         env:
           PYTHONPATH: src
         run: python scripts/generate_release_metadata.py
+      - name: Attest Windows executable provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: |
+            dist/AlinaCoder.exe
+            dist/AlinaCoderSetup.exe
+      - name: Attest AlinaCoder SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: dist/AlinaCoder.exe
+          sbom-path: dist/sbom.spdx.json
+      - name: Verify cryptographic artifact provenance
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh attestation verify .\dist\AlinaCoder.exe -R Rapt0r06300/alinacoder --signer-workflow Rapt0r06300/alinacoder/.github/workflows/ci.yml --format json | Set-Content .\dist\provenance-verification.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "AlinaCoder.exe provenance verification failed" }
+          gh attestation verify .\dist\AlinaCoderSetup.exe -R Rapt0r06300/alinacoder --signer-workflow Rapt0r06300/alinacoder/.github/workflows/ci.yml --format json | Set-Content .\dist\setup-provenance-verification.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "AlinaCoderSetup.exe provenance verification failed" }
+          gh attestation verify .\dist\AlinaCoder.exe -R Rapt0r06300/alinacoder --signer-workflow Rapt0r06300/alinacoder/.github/workflows/ci.yml --predicate-type https://spdx.dev/Document/v2.3 --format json | Set-Content .\dist\sbom-attestation-verification.json -Encoding utf8
+          if ($LASTEXITCODE -ne 0) { throw "SBOM attestation verification failed" }
       - name: Smoke packaged application
         shell: pwsh
         run: |
           $proc = Start-Process -FilePath ".\dist\AlinaCoder.exe" -ArgumentList "--self-test" -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "packaged self-test failed with exit code $($proc.ExitCode)" }
+          $semantic = Start-Process -FilePath ".\dist\AlinaCoder.exe" -ArgumentList "--semantic-ui" -Wait -PassThru
+          if ($semantic.ExitCode -ne 0) { throw "packaged semantic UI oracle failed with exit code $($semantic.ExitCode)" }
       - name: Install, repair, run packaged mission, and uninstall
         shell: pwsh
         run: |
@@ -70,6 +109,9 @@ jobs:
           if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "repair removed user data" }
           $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--self-test" -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "installed self-test failed with exit code $($proc.ExitCode)" }
+          $semantic = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--semantic-ui" -Wait -PassThru
+          if ($semantic.ExitCode -ne 0) { throw "installed semantic UI oracle failed with exit code $($semantic.ExitCode)" }
+          @{ok=$true; source="installed AlinaCoder.exe --semantic-ui"; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content .\dist\semantic-ui-evidence.json -Encoding utf8
 
           New-Item -ItemType Directory -Path $fixture | Out-Null
           git -C $fixture init -b main
@@ -89,6 +131,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "uninstaller failed with exit code $LASTEXITCODE" }
           if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left executable behind" }
           if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "uninstall violated user-data retention policy" }
+          @{ok=$true; source="clean Windows install/repair/e2e/uninstall"; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content .\dist\windows-clean-install-evidence.json -Encoding utf8
       - name: Verify release bundle provenance
         shell: pwsh
         env:
@@ -102,24 +145,70 @@ jobs:
           @'
           import json
           import os
+          from dataclasses import asdict
           from pathlib import Path
           from alinacoder.evaluation.torture import IntegratedTortureHarness
-          from alinacoder.release.acceptance import AcceptanceEvidence, FinalAcceptanceGate, RuleTraceabilityBuilder, sha256_file
+          from alinacoder.release.acceptance import (
+              AcceptanceCatalogRunner,
+              AcceptanceEvidence,
+              FinalAcceptanceGate,
+              RuleTraceabilityBuilder,
+              SpecAcceptanceMatrix,
+              sha256_file,
+          )
 
           root = Path('.')
-          artifact = root / 'dist' / 'AlinaCoder.exe'
+          dist = root / 'dist'
+          artifact = dist / 'AlinaCoder.exe'
           commit = os.environ['GITHUB_SHA']
           digest = sha256_file(artifact)
-          desktop = json.loads((root / 'dist' / 'desktop-acceptance-evidence.json').read_text(encoding='utf-8'))
+          desktop = json.loads((dist / 'desktop-acceptance-evidence.json').read_text(encoding='utf-8-sig'))
+          clean_install = json.loads((dist / 'windows-clean-install-evidence.json').read_text(encoding='utf-8-sig'))
+          semantic_ui = json.loads((dist / 'semantic-ui-evidence.json').read_text(encoding='utf-8-sig'))
+          provenance_ok = all(
+              (dist / name).exists() and (dist / name).stat().st_size > 2
+              for name in (
+                  'provenance-verification.json',
+                  'setup-provenance-verification.json',
+                  'sbom-attestation-verification.json',
+              )
+          )
           torture = IntegratedTortureHarness(seed=f'ci:{commit}').run()
           trace = RuleTraceabilityBuilder(root).build()
+          matrix = SpecAcceptanceMatrix()
+          case_evidences = AcceptanceCatalogRunner(root).run(
+              external_evidence={
+                  'windows.clean_install': bool(clean_install.get('ok')),
+                  'desktop.semantic_ui': bool(semantic_ui.get('ok')),
+              }
+          )
+          matrix_report = matrix.evaluate(case_evidences)
           evidences = [
-              AcceptanceEvidence('core', 'PASS', commit, digest, True, source='github-actions'),
+              AcceptanceEvidence('core', 'PASS', commit, digest, True, source='github-actions:core'),
               AcceptanceEvidence('desktop_e2e', 'PASS' if desktop.get('ok') else 'FAIL', commit, digest, True, source='packaged-e2e'),
               AcceptanceEvidence('torture', 'PASS' if torture.readiness.ready else 'FAIL', commit, digest, True, source='integrated-torture'),
-              AcceptanceEvidence('final_audit', 'PASS' if trace.complete else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
+              AcceptanceEvidence('provenance', 'PASS' if provenance_ok else 'FAIL', commit, digest, True, source='github-attestation'),
+              AcceptanceEvidence('final_audit', 'PASS' if trace.complete and matrix_report.passed else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
           ]
-          result = FinalAcceptanceGate(trace, ('core','desktop_e2e','torture','final_audit'), commit_sha=commit, artifact_sha256=digest).evaluate(evidences)
+          result = FinalAcceptanceGate(
+              trace,
+              ('core','desktop_e2e','torture','provenance','final_audit'),
+              commit_sha=commit,
+              artifact_sha256=digest,
+              acceptance_matrix=matrix,
+          ).evaluate(evidences, case_evidences)
+          cases_report = {
+              'commit_sha': commit,
+              'artifact_sha256': digest,
+              'passed_cases': matrix_report.passed_cases,
+              'required_cases': matrix_report.required_cases,
+              'passed': matrix_report.passed,
+              'missing': list(matrix_report.missing),
+              'invalid': list(matrix_report.invalid),
+              'unknown': list(matrix_report.unknown),
+              'cases': [asdict(item) for item in case_evidences],
+          }
+          (dist / 'acceptance-cases-evidence.json').write_text(json.dumps(cases_report, indent=2, sort_keys=True), encoding='utf-8')
           report = {
               'runtime_v0_2_ready': result.runtime_v0_2_ready,
               'commit_sha': commit,
@@ -128,14 +217,18 @@ jobs:
               'rule_count': trace.rule_count,
               'torture_score': torture.readiness.score,
               'desktop_e2e': bool(desktop.get('ok')),
+              'provenance_verified': provenance_ok,
+              'acceptance_cases_passed': matrix_report.passed_cases,
+              'acceptance_cases_required': matrix_report.required_cases,
+              'acceptance_matrix_passed': matrix_report.passed,
               'missing_or_invalid_evidence': list(result.missing_or_invalid_evidence),
               'failures': list(result.failures),
           }
-          Path('dist/final-acceptance-evidence.json').write_text(json.dumps(report, indent=2, sort_keys=True), encoding='utf-8')
+          (dist / 'final-acceptance-evidence.json').write_text(json.dumps(report, indent=2, sort_keys=True), encoding='utf-8')
           print(json.dumps(report, sort_keys=True))
           raise SystemExit(0 if result.runtime_v0_2_ready else 2)
           '@ | python -
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: AlinaCoder-v0.2-rc-${{ github.sha }}
           path: |
@@ -146,5 +239,11 @@ jobs:
             dist/USER_GUIDE.md
             dist/OPERATIONS.md
             dist/desktop-acceptance-evidence.json
+            dist/semantic-ui-evidence.json
+            dist/windows-clean-install-evidence.json
+            dist/provenance-verification.json
+            dist/setup-provenance-verification.json
+            dist/sbom-attestation-verification.json
+            dist/acceptance-cases-evidence.json
             dist/final-acceptance-evidence.json
           if-no-files-found: error
