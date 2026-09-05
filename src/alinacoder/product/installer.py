@@ -94,22 +94,46 @@ def _write_metadata(
     temporary.replace(install_dir / "install.json")
 
 
-def _preserve_preexisting_ownership(report: BootstrapReport, initial_inventory: Any, adapter: Any) -> BootstrapReport:
-    if report.state is None or initial_inventory is None:
+def _normalize_bootstrap_state(
+    report: BootstrapReport,
+    initial_inventory: Any,
+    previous_state: BootstrapState | None,
+    adapter: Any,
+) -> BootstrapReport:
+    if report.state is None:
         return report
     components = dict(report.state.components)
     changed = False
     for name, initial in (("git", getattr(initial_inventory, "git", None)), ("ollama", getattr(initial_inventory, "ollama", None))):
-        if initial is None or getattr(initial, "origin", "") != "pre_existing" or name not in components:
-            continue
-        current = components[name]
-        if current.origin != "pre_existing":
+        if initial is not None and getattr(initial, "origin", "") == "pre_existing" and name in components:
+            current = components[name]
+            if current.origin != "pre_existing":
+                components[name] = replace(
+                    current,
+                    origin="pre_existing",
+                    previous_version="",
+                    previous_source_url="",
+                    previous_sha256="",
+                )
+                changed = True
+                continue
+        prior = previous_state.components.get(name) if previous_state else None
+        current = components.get(name)
+        if (
+            prior is not None and current is not None
+            and prior.origin == "managed_by_alinacoder"
+            and current.origin == "managed_by_alinacoder"
+            and prior.version == current.version
+            and prior.source_url and prior.sha256
+            and (not current.source_url or not current.sha256)
+        ):
             components[name] = replace(
                 current,
-                origin="pre_existing",
-                previous_version="",
-                previous_source_url="",
-                previous_sha256="",
+                source_url=prior.source_url,
+                sha256=prior.sha256,
+                previous_version=prior.previous_version,
+                previous_source_url=prior.previous_source_url,
+                previous_sha256=prior.previous_sha256,
             )
             changed = True
     if not changed:
@@ -146,8 +170,10 @@ def install(
     adapter = getattr(bootstrapper, "adapter", None)
     detect = getattr(adapter, "detect_inventory", None)
     initial_inventory = detect() if callable(detect) else None
+    load_state = getattr(adapter, "load_state", None)
+    previous_state = load_state() if callable(load_state) else None
     report = bootstrapper.run(online=online, model_override=model)
-    report = _preserve_preexisting_ownership(report, initial_inventory, adapter)
+    report = _normalize_bootstrap_state(report, initial_inventory, previous_state, adapter)
     _write_metadata(install_dir, operation=operation, report=report)
     if not report.ready:
         raise BootstrapError("prerequisite bootstrap incomplete: " + ", ".join(report.blockers))
