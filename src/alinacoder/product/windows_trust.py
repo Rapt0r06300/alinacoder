@@ -4,10 +4,12 @@ import ctypes
 import os
 import shutil
 import subprocess
+import urllib.error
 import zipfile
 from ctypes import wintypes
 from pathlib import Path
 
+from . import prerequisites as _prerequisites_module
 from .prerequisites import (
     BootstrapError,
     ComponentReceipt,
@@ -315,3 +317,21 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
                 self._sleep(float(2**attempt))
 
         return False
+
+    def smoke_model(self, endpoint: str, model: str) -> str:
+        """Run a deterministic local inference smoke independent of reasoning tokens."""
+
+        try:
+            payload = _prerequisites_module._json_bytes(
+                endpoint.rstrip("/") + "/api/generate",
+                {
+                    "model": model,
+                    "prompt": "Reply only with OK.",
+                    "think": False,
+                    "stream": False,
+                    "options": {"num_predict": 16},
+                },
+            )
+            return str(payload.get("response", "")).strip()
+        except (OSError, ValueError, urllib.error.URLError, TimeoutError):
+            return ""
