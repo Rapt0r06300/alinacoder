@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import ctypes
 import os
+import shutil
 import subprocess
+import zipfile
 from ctypes import wintypes
 from pathlib import Path
 
@@ -117,6 +119,18 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
         return verify_windows_authenticode(path)
 
     @staticmethod
+    def _managed_git_root() -> Path:
+        local = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData" / "Local")))
+        return local / "Programs" / "AlinaCoder" / "Git"
+
+    def _candidate_executables(self, name: str) -> tuple[Path, ...]:
+        candidates = list(super()._candidate_executables(name))
+        if name == "git":
+            managed = self._managed_git_root() / "cmd" / "git.exe"
+            candidates = [managed] + [candidate for candidate in candidates if candidate != managed]
+        return tuple(candidates)
+
+    @staticmethod
     def _is_silent_installer(args: list[str]) -> bool:
         if not args or Path(args[0]).suffix.lower() != ".exe":
             return False
@@ -155,7 +169,87 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
             raise
         return int(code), ""
 
+    @staticmethod
+    def _safe_extract_zip(archive_path: Path, destination: Path) -> None:
+        root = destination.resolve()
+        destination.mkdir(parents=True, exist_ok=True)
+        try:
+            with zipfile.ZipFile(archive_path) as archive:
+                for member in archive.infolist():
+                    raw_name = member.filename.replace("\\", "/")
+                    candidate = Path(raw_name)
+                    if candidate.is_absolute() or ".." in candidate.parts:
+                        raise BootstrapError("MinGit archive contains an unsafe path")
+                    target = (destination / candidate).resolve()
+                    if target != root and root not in target.parents:
+                        raise BootstrapError("MinGit archive escapes managed destination")
+                    if member.is_dir():
+                        target.mkdir(parents=True, exist_ok=True)
+                        continue
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with archive.open(member) as source, target.open("wb") as handle:
+                        shutil.copyfileobj(source, handle)
+        except (OSError, zipfile.BadZipFile) as exc:
+            raise BootstrapError("verified MinGit archive could not be extracted") from exc
+
+    def _install_mingit(self, *, operation: str) -> ComponentReceipt:
+        policy = self._policy("git")
+        asset = self.latest_asset("git")
+        if not asset.name.lower().startswith("mingit-") or not asset.name.lower().endswith(".zip"):
+            raise BootstrapError("Git bootstrap requires the official MinGit ZIP asset")
+        if not version_at_least(asset.version, policy.minimum_version):
+            raise BootstrapError("latest MinGit release is below required minimum")
+
+        previous = self.detect_inventory().git
+        archive = self.download_verified(asset, require_authenticode=False)
+        root = self._managed_git_root()
+        staging = root.with_name("Git.alinacoder-staging")
+        backup = root.with_name("Git.alinacoder-backup")
+        shutil.rmtree(staging, ignore_errors=True)
+        self._safe_extract_zip(archive, staging)
+        staged_git = staging / "cmd" / "git.exe"
+        if not staged_git.is_file():
+            shutil.rmtree(staging, ignore_errors=True)
+            raise BootstrapError("verified MinGit archive is missing cmd/git.exe")
+        code, output = self._run([str(staged_git), "--version"], timeout=30)
+        if code != 0 or not version_at_least(output, policy.minimum_version):
+            shutil.rmtree(staging, ignore_errors=True)
+            raise BootstrapError("extracted MinGit failed version verification")
+
+        shutil.rmtree(backup, ignore_errors=True)
+        if root.exists():
+            root.replace(backup)
+        try:
+            root.parent.mkdir(parents=True, exist_ok=True)
+            staging.replace(root)
+            managed_git = root / "cmd" / "git.exe"
+            code, output = self._run([str(managed_git), "--version"], timeout=30)
+            if code != 0 or not version_at_least(output, policy.minimum_version):
+                raise BootstrapError("managed MinGit failed post-install verification")
+        except Exception:
+            shutil.rmtree(root, ignore_errors=True)
+            if backup.exists():
+                backup.replace(root)
+            raise
+        shutil.rmtree(backup, ignore_errors=True)
+
+        receipt = ComponentReceipt(
+            name="git",
+            version=asset.version,
+            origin="managed_by_alinacoder",
+            source_url=asset.url,
+            sha256=asset.sha256,
+            healthy=True,
+            path=str(root / "cmd" / "git.exe"),
+            previous_version=previous.version if previous else "",
+        )
+        self._last_install_receipts["git"] = receipt
+        return receipt
+
     def install_component(self, component: str, *, operation: str) -> ComponentReceipt:
+        if component == "git":
+            return self._install_mingit(operation=operation)
+
         receipt = super().install_component(component, operation=operation)
         policy = self._policy(component)
 
@@ -164,11 +258,30 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
         # expected minimum version. This also makes completion deterministic on CI.
         for attempt in range(180):
             inventory = self.detect_inventory()
-            installed = inventory.git if component == "git" else inventory.ollama
+            installed = inventory.ollama
             if installed is not None and version_at_least(installed.version, policy.minimum_version):
                 return receipt
             self._sleep(min(0.5 + (attempt * 0.05), 2.0))
         raise BootstrapError(f"{component} {operation} launcher exited but verified installation was not observed")
+
+    def managed_uninstall(self, *, purge: bool = False) -> tuple[str, ...]:
+        removed = list(super().managed_uninstall(purge=purge))
+        if not purge:
+            return tuple(removed)
+        state = self.load_state()
+        receipt = state.components.get("git") if state else None
+        root = self._managed_git_root()
+        if receipt and receipt.origin == "managed_by_alinacoder" and root.exists():
+            try:
+                receipt_path = Path(receipt.path).resolve() if receipt.path else None
+                root_resolved = root.resolve()
+                if receipt_path is not None and receipt_path != root_resolved and root_resolved not in receipt_path.parents:
+                    raise BootstrapError("refusing to purge Git outside AlinaCoder managed root")
+                shutil.rmtree(root)
+                removed.append("git")
+            except OSError as exc:
+                raise BootstrapError("managed MinGit purge failed") from exc
+        return tuple(dict.fromkeys(removed))
 
     def pull_model(self, endpoint: str, model: str) -> bool:
         """Pull a model with bounded retries while preserving Ollama's native resume."""
