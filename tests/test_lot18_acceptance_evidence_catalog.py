@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -24,6 +26,21 @@ class Lot18AcceptanceEvidenceCatalogTests(unittest.TestCase):
         report = AcceptanceCoverageCatalog(root).validate(matrix)
         self.assertEqual(report.unknown, ())
         self.assertEqual(report.duplicates, ())
+
+    def test_named_test_must_actually_exist_in_referenced_file(self) -> None:
+        matrix = SpecAcceptanceMatrix()
+        first = matrix.required_case_ids()[0]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "tests").mkdir()
+            (root / "tests" / "proof.py").write_text("def test_real_proof(): pass\n", encoding="utf-8")
+            (root / "catalog.json").write_text(
+                json.dumps({"cases": [{"case_id": first, "path": "tests/proof.py", "test_name": "test_not_here"}]}),
+                encoding="utf-8",
+            )
+            report = AcceptanceCoverageCatalog(root, "catalog.json").validate(matrix)
+            self.assertFalse(report.complete)
+            self.assertIn(first, report.gaps)
 
 
 if __name__ == "__main__":
