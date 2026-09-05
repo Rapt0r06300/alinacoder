@@ -4,6 +4,7 @@ import unittest
 
 from alinacoder.product import installer
 from alinacoder.product import prerequisites as p
+from alinacoder.product.prerequisite_lifecycle import managed_rollback_actions
 
 
 class Lot19RollbackHardeningTests(unittest.TestCase):
@@ -28,7 +29,7 @@ class Lot19RollbackHardeningTests(unittest.TestCase):
             selected_model="qwen3:0.6b",
             ready=True,
         )
-        actions = p.managed_rollback_actions(state)
+        actions = managed_rollback_actions(state)
         self.assertEqual(len(actions), 1)
         self.assertEqual(actions[0].component, "ollama")
         self.assertEqual(actions[0].target_version, "0.32.0")
@@ -45,7 +46,7 @@ class Lot19RollbackHardeningTests(unittest.TestCase):
             selected_model="qwen3:0.6b",
             ready=True,
         )
-        self.assertEqual(p.managed_rollback_actions(state), ())
+        self.assertEqual(managed_rollback_actions(state), ())
 
     def test_installer_exposes_explicit_rollback_lifecycle(self) -> None:
         self.assertTrue(hasattr(installer, "rollback"))
