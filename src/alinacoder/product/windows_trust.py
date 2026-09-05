@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import ctypes
 import os
+import subprocess
 from ctypes import wintypes
 from pathlib import Path
 
-from .prerequisites import WindowsBootstrapAdapter as _PowerShellWindowsBootstrapAdapter
+from .prerequisites import (
+    BootstrapError,
+    ComponentReceipt,
+    WindowsBootstrapAdapter as _PowerShellWindowsBootstrapAdapter,
+    version_at_least,
+)
 
 
 class _GUID(ctypes.Structure):
@@ -105,7 +111,84 @@ def verify_windows_authenticode(path: Path | str) -> bool:
 
 
 class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
-    """Production Windows adapter using native trust verification."""
+    """Production Windows adapter using native trust and bounded process execution."""
 
     def verify_authenticode(self, path: Path | str) -> bool:
         return verify_windows_authenticode(path)
+
+    @staticmethod
+    def _is_silent_installer(args: list[str]) -> bool:
+        if not args or Path(args[0]).suffix.lower() != ".exe":
+            return False
+        switches = {str(item).upper() for item in args[1:]}
+        return bool(switches.intersection({"/VERYSILENT", "/SILENT"}))
+
+    def _default_command_runner(self, args: list[str], *, timeout: int = 300) -> tuple[int, str]:
+        """Run official GUI installers without inheritable output pipes.
+
+        Inno Setup launchers can hand work to a temporary child process. Captured
+        stdout/stderr handles may remain inherited by that child after the launcher
+        exits, causing ``subprocess.run(..., PIPE)`` to wait for EOF indefinitely.
+        GUI installers have no machine-consumed stdout contract, so route all three
+        standard handles to DEVNULL and rely on exit code plus post-install inventory.
+        Other commands retain the base captured-output behavior.
+        """
+
+        if not self._is_silent_installer(args):
+            return super()._default_command_runner(args, timeout=timeout)
+
+        process = subprocess.Popen(
+            args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        try:
+            code = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            raise
+        return int(code), ""
+
+    def install_component(self, component: str, *, operation: str) -> ComponentReceipt:
+        receipt = super().install_component(component, operation=operation)
+        policy = self._policy(component)
+
+        # A verified GUI bootstrapper may return after handing work to its temporary
+        # child. Do not declare the dependency installed until inventory observes the
+        # expected minimum version. This also makes completion deterministic on CI.
+        for attempt in range(180):
+            inventory = self.detect_inventory()
+            installed = inventory.git if component == "git" else inventory.ollama
+            if installed is not None and version_at_least(installed.version, policy.minimum_version):
+                return receipt
+            self._sleep(min(0.5 + (attempt * 0.05), 2.0))
+        raise BootstrapError(f"{component} {operation} launcher exited but verified installation was not observed")
+
+    def pull_model(self, endpoint: str, model: str) -> bool:
+        """Pull a model with bounded retries while preserving Ollama's native resume."""
+
+        executable = self._ollama_executable()
+        if executable is None:
+            return False
+
+        for attempt in range(3):
+            try:
+                code, _ = self._run([str(executable), "pull", model], timeout=600)
+            except subprocess.TimeoutExpired:
+                code = -1
+
+            if code == 0:
+                inventory = self.detect_inventory()
+                if model in inventory.models:
+                    return True
+
+            if attempt < 2:
+                self._sleep(float(2**attempt))
+
+        return False
