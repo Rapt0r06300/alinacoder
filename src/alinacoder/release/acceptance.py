@@ -193,15 +193,14 @@ class AcceptanceCoverageCatalog:
         self.repo_root = Path(repo_root)
         self.catalog_path = Path(catalog_path)
 
-    def validate(self, matrix: SpecAcceptanceMatrix | None = None) -> AcceptanceCoverageReport:
-        matrix = matrix or SpecAcceptanceMatrix()
-        path = self.catalog_path if self.catalog_path.is_absolute() else self.repo_root / self.catalog_path
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        required = set(matrix.required_case_ids())
+    @property
+    def path(self) -> Path:
+        return self.catalog_path if self.catalog_path.is_absolute() else self.repo_root / self.catalog_path
+
+    def _read_rows(self) -> tuple[list[AcceptanceCoverageRow], set[str], set[str]]:
+        payload = json.loads(self.path.read_text(encoding="utf-8"))
         rows: list[AcceptanceCoverageRow] = []
         seen: set[str] = set()
-        gaps: set[str] = set()
-        unknown: set[str] = set()
         duplicates: set[str] = set()
         for entry in payload.get("cases", []):
             row = AcceptanceCoverageRow(
@@ -210,13 +209,19 @@ class AcceptanceCoverageCatalog:
                 test_name=str(entry.get("test_name", "")),
                 evidence_key=str(entry.get("evidence_key", "")),
             )
-            if row.case_id not in required:
-                unknown.add(row.case_id or "invalid_case")
-                continue
             if row.case_id in seen:
-                duplicates.add(row.case_id)
+                duplicates.add(row.case_id or "invalid_case")
                 continue
             seen.add(row.case_id)
+            rows.append(row)
+        return rows, seen, duplicates
+
+    def _row_gaps(self, rows: list[AcceptanceCoverageRow]) -> set[str]:
+        gaps: set[str] = set()
+        for row in rows:
+            if not row.case_id:
+                gaps.add("invalid_case")
+                continue
             if row.path:
                 candidate = self.repo_root / row.path
                 if not candidate.exists():
@@ -227,14 +232,34 @@ class AcceptanceCoverageCatalog:
                         gaps.add(row.case_id)
             elif not row.evidence_key:
                 gaps.add(row.case_id)
-            rows.append(row)
+        return gaps
+
+    def validate(self, matrix: SpecAcceptanceMatrix | None = None) -> AcceptanceCoverageReport:
+        matrix = matrix or SpecAcceptanceMatrix()
+        required = set(matrix.required_case_ids())
+        rows, seen, duplicates = self._read_rows()
+        unknown = {row.case_id for row in rows if row.case_id not in required}
+        valid_rows = [row for row in rows if row.case_id in required]
+        gaps = self._row_gaps(valid_rows)
         gaps.update(required - seen)
         complete = not gaps and not unknown and not duplicates
         return AcceptanceCoverageReport(
             complete,
-            tuple(rows),
+            tuple(valid_rows),
             tuple(sorted(gaps)),
             tuple(sorted(unknown)),
+            tuple(sorted(duplicates)),
+        )
+
+    def load_unconstrained(self) -> AcceptanceCoverageReport:
+        rows, _, duplicates = self._read_rows()
+        gaps = self._row_gaps(rows)
+        complete = not gaps and not duplicates
+        return AcceptanceCoverageReport(
+            complete,
+            tuple(rows),
+            tuple(sorted(gaps)),
+            (),
             tuple(sorted(duplicates)),
         )
 
@@ -249,12 +274,12 @@ class AcceptanceCatalogRunner:
 
     def run(self, *, external_evidence: dict[str, bool] | None = None) -> tuple[AcceptanceCaseEvidence, ...]:
         external_evidence = dict(external_evidence or {})
-        catalog = AcceptanceCoverageCatalog(self.repo_root, self.catalog_path).validate(SpecAcceptanceMatrix())
+        catalog_obj = AcceptanceCoverageCatalog(self.repo_root, self.catalog_path)
+        is_default = self.catalog_path == Path(AcceptanceCoverageCatalog.DEFAULT_PATH)
+        catalog = catalog_obj.validate(SpecAcceptanceMatrix()) if is_default else catalog_obj.load_unconstrained()
         if not catalog.complete:
-            return tuple(
-                AcceptanceCaseEvidence(case_id, "FAIL", True, "catalog_gap")
-                for case_id in SpecAcceptanceMatrix().required_case_ids()
-            )
+            case_ids = SpecAcceptanceMatrix().required_case_ids() if is_default else tuple(row.case_id for row in catalog.rows)
+            return tuple(AcceptanceCaseEvidence(case_id, "FAIL", True, "catalog_gap") for case_id in case_ids)
         results: list[AcceptanceCaseEvidence] = []
         for row in catalog.rows:
             if row.evidence_key:
