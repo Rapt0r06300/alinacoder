@@ -298,7 +298,9 @@ class FinalAcceptanceGate:
         final_audit = by_name.get("final_audit")
         if not final_audit or not final_audit.independent:
             failures.append("independent_final_audit")
-        if self.acceptance_matrix is not None:
+        if self.acceptance_matrix is None:
+            failures.append("missing_spec_acceptance_matrix")
+        else:
             matrix_report = self.acceptance_matrix.evaluate(acceptance_case_evidences)
             if not matrix_report.passed:
                 failures.append("incomplete_spec_acceptance_matrix")
