@@ -7,17 +7,34 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-signature-suffix-winps:
+  diagnose-python-signature-wrapper:
     runs-on: windows-latest
     steps:
-      - name: Compare WinPS Authenticode with atomic temp suffix
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Show exact Python wrapper output
         shell: pwsh
+        env:
+          PYTHONPATH: src
         run: |
-          $ErrorActionPreference = "Stop"
           $url = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe"
-          $bad = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe.partial"
-          $good = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.partial.exe"
-          Invoke-WebRequest -Uri $url -OutFile $bad
-          Copy-Item $bad $good
-          & powershell.exe -NoProfile -NonInteractive -Command "Write-Output ('BAD_WINPS=' + (Get-AuthenticodeSignature -LiteralPath '$bad').Status.ToString()); Write-Output ('GOOD_WINPS=' + (Get-AuthenticodeSignature -LiteralPath '$good').Status.ToString())"
-          if ($LASTEXITCODE -ne 0) { throw "WinPS diagnostic failed" }
+          $file = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe.partial"
+          Invoke-WebRequest -Uri $url -OutFile $file
+          $env:LOT19_SIGNED_FILE = $file
+          @'
+          import os
+          from pathlib import Path
+          from alinacoder.product.prerequisites import PrerequisiteManifest, WindowsBootstrapAdapter
+          manifest = PrerequisiteManifest.load(Path('packaging/prerequisites-v0.2.json'))
+          adapter = WindowsBootstrapAdapter(Path(os.environ['RUNNER_TEMP'])/'lot19-wrapper', manifest)
+          path = Path(os.environ['LOT19_SIGNED_FILE'])
+          escaped = str(path).replace("'", "''")
+          command = ['powershell.exe','-NoProfile','-NonInteractive','-Command',f"(Get-AuthenticodeSignature -LiteralPath '{escaped}').Status.ToString()"]
+          code, output = adapter._run(command, timeout=60)
+          print('CODE_REPR=', repr(code))
+          print('OUTPUT_REPR=', repr(output))
+          print('STRIPPED_REPR=', repr(output.strip().lower()))
+          print('VERIFY=', adapter.verify_authenticode(path))
+          '@ | python -
