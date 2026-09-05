@@ -55,17 +55,40 @@ jobs:
         run: |
           $proc = Start-Process -FilePath ".\dist\AlinaCoder.exe" -ArgumentList "--self-test" -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "packaged self-test failed with exit code $($proc.ExitCode)" }
-      - name: Install, run, uninstall on clean temp destination
+      - name: Install, repair, run packaged mission, and uninstall
         shell: pwsh
         run: |
-          $dest = Join-Path $env:RUNNER_TEMP "AlinaCoder-RC"
+          $dest = Join-Path $env:RUNNER_TEMP "AlinaCoderRC"
+          $fixture = Join-Path $env:RUNNER_TEMP "AlinaCoderAcceptanceRepo"
+          $evidence = Join-Path $env:RUNNER_TEMP "desktop-acceptance-evidence.json"
+          Remove-Item -Recurse -Force $dest,$fixture -ErrorAction SilentlyContinue
           .\dist\AlinaCoderSetup.exe --quiet --install-dir $dest
           if ($LASTEXITCODE -ne 0) { throw "installer failed with exit code $LASTEXITCODE" }
+          Set-Content -Path (Join-Path $dest "user-state.json") -Value '{"preserve":true}' -Encoding utf8
+          .\dist\AlinaCoderSetup.exe --repair --quiet --install-dir $dest
+          if ($LASTEXITCODE -ne 0) { throw "repair failed with exit code $LASTEXITCODE" }
+          if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "repair removed user data" }
           $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--self-test" -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "installed self-test failed with exit code $($proc.ExitCode)" }
+
+          New-Item -ItemType Directory -Path $fixture | Out-Null
+          git -C $fixture init -b main
+          git -C $fixture config user.email "alinacoder-ci@example.invalid"
+          git -C $fixture config user.name "AlinaCoder CI"
+          Set-Content -Path (Join-Path $fixture "README.md") -Value "# AlinaCoder acceptance fixture" -Encoding utf8
+          git -C $fixture add README.md
+          git -C $fixture commit -m "fixture baseline"
+          $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList @("--acceptance-e2e","--workspace",$fixture,"--evidence-out",$evidence) -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "packaged acceptance mission failed with exit code $($proc.ExitCode)" }
+          $mission = Get-Content $evidence -Raw | ConvertFrom-Json
+          if (-not $mission.ok) { throw "packaged acceptance evidence did not pass" }
+          if ($mission.branch -ne "main") { throw "packaged mission left main branch" }
+          Copy-Item $evidence .\dist\desktop-acceptance-evidence.json
+
           .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $dest
           if ($LASTEXITCODE -ne 0) { throw "uninstaller failed with exit code $LASTEXITCODE" }
           if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left executable behind" }
+          if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "uninstall violated user-data retention policy" }
       - name: Verify release bundle provenance
         shell: pwsh
         env:
@@ -81,4 +104,5 @@ jobs:
             dist/sbom.spdx.json
             dist/USER_GUIDE.md
             dist/OPERATIONS.md
+            dist/desktop-acceptance-evidence.json
           if-no-files-found: error
