@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 
+from alinacoder.desktop.app import product_capabilities
 from alinacoder.desktop.experience import FirstRunOnboarding, VoiceInputAdapter, WindowsSpeechRecognizer
 from alinacoder.product.provenance import ProvenanceEvidence, ReleaseAdmissionPolicy
 
@@ -41,6 +42,18 @@ class Lot14DesktopProductCompletionTests(unittest.TestCase):
         self.assertIn("SetInputToDefaultAudioDevice", command)
         self.assertNotIn("http://", command.lower())
         self.assertNotIn("https://", command.lower())
+
+    def test_product_entrypoint_exposes_real_onboarding_voice_and_inference_configuration(self) -> None:
+        capabilities = product_capabilities()
+        self.assertTrue(
+            {
+                "first_run_onboarding",
+                "voice_input",
+                "provider_configuration",
+                "local_runtime_configuration",
+                "conversation_first_workbench",
+            }.issubset(capabilities)
+        )
 
 
 class Lot16ReleaseProvenanceCompletionTests(unittest.TestCase):
