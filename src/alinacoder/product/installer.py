@@ -248,9 +248,30 @@ def rollback(
     state = _load_bootstrap_state(bootstrapper)
     if state is None:
         raise BootstrapError("no bootstrap state available for rollback")
+
     restored = rollback_managed(adapter, state)
     if not restored:
-        raise BootstrapError("no provenance-bound managed prerequisite rollback target is available")
+        # Same-version upgrades intentionally produce no rollback target. Treat that
+        # as an idempotent no-op only when there is no evidence that an earlier
+        # version ever existed and the current bootstrap state is still healthy.
+        # Any partial previous provenance remains fail-closed rather than being
+        # misreported as a successful rollback.
+        has_previous_hint = any(
+            receipt.origin == "managed_by_alinacoder"
+            and not name.startswith("model:")
+            and bool(receipt.previous_version or receipt.previous_source_url or receipt.previous_sha256)
+            for name, receipt in state.components.items()
+        )
+        if has_previous_hint:
+            raise BootstrapError("no valid provenance-bound managed prerequisite rollback target is available")
+        ready = bool(state.ready and adapter.ollama_ready(bootstrapper.manifest.ollama.endpoint))
+        if not ready:
+            raise BootstrapError("rollback no-op refused because current bootstrap state is not healthy")
+        report = BootstrapReport(True, state.selected_model, (), (), state)
+        adapter.persist_report(report)
+        _write_metadata(install_dir, operation="rollback", report=report)
+        return ()
+
     inventory = adapter.detect_inventory()
     components = dict(state.components)
     for name in restored:
