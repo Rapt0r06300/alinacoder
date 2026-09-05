@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 import os
 from pathlib import Path
@@ -93,6 +94,34 @@ def _write_metadata(
     temporary.replace(install_dir / "install.json")
 
 
+def _preserve_preexisting_ownership(report: BootstrapReport, initial_inventory: Any, adapter: Any) -> BootstrapReport:
+    if report.state is None or initial_inventory is None:
+        return report
+    components = dict(report.state.components)
+    changed = False
+    for name, initial in (("git", getattr(initial_inventory, "git", None)), ("ollama", getattr(initial_inventory, "ollama", None))):
+        if initial is None or getattr(initial, "origin", "") != "pre_existing" or name not in components:
+            continue
+        current = components[name]
+        if current.origin != "pre_existing":
+            components[name] = replace(
+                current,
+                origin="pre_existing",
+                previous_version="",
+                previous_source_url="",
+                previous_sha256="",
+            )
+            changed = True
+    if not changed:
+        return report
+    state = BootstrapState(components, report.state.selected_model, report.state.ready, report.state.pending)
+    corrected = BootstrapReport(report.ready, report.selected_model, report.actions, report.blockers, state)
+    persist = getattr(adapter, "persist_report", None)
+    if callable(persist):
+        persist(corrected)
+    return corrected
+
+
 def install(
     install_dir: Path,
     source_exe: Path | None = None,
@@ -114,7 +143,11 @@ def install(
     if bootstrapper is None:
         _write_metadata(install_dir, operation=operation)
         return target
+    adapter = getattr(bootstrapper, "adapter", None)
+    detect = getattr(adapter, "detect_inventory", None)
+    initial_inventory = detect() if callable(detect) else None
     report = bootstrapper.run(online=online, model_override=model)
+    report = _preserve_preexisting_ownership(report, initial_inventory, adapter)
     _write_metadata(install_dir, operation=operation, report=report)
     if not report.ready:
         raise BootstrapError("prerequisite bootstrap incomplete: " + ", ".join(report.blockers))
