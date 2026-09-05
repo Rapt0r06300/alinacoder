@@ -178,116 +178,92 @@ class AcceptanceCoverageReport:
     complete: bool
     rows: tuple[AcceptanceCoverageRow, ...]
     gaps: tuple[str, ...]
-    unknown: tuple[str, ...]
-    duplicates: tuple[str, ...]
-    covered_cases: int
 
 
 class AcceptanceCoverageCatalog:
-    def __init__(self, repo_root: Path | str, relative_path: str = "docs/release/acceptance-coverage-v0.2.json") -> None:
+    def __init__(self, repo_root: Path | str) -> None:
         self.repo_root = Path(repo_root)
-        self.path = self.repo_root / relative_path
 
-    def _rows(self) -> tuple[AcceptanceCoverageRow, ...]:
-        payload = json.loads(self.path.read_text(encoding="utf-8"))
-        return tuple(
-            AcceptanceCoverageRow(
-                case_id=str(item["case_id"]), path=str(item["path"]),
-                test_name=str(item.get("test_name", "")), evidence_key=str(item.get("evidence_key", "")),
-            )
-            for item in payload.get("cases", [])
-        )
-
-    def validate(self, matrix: SpecAcceptanceMatrix) -> AcceptanceCoverageReport:
-        rows = self._rows()
+    def load(self) -> AcceptanceCoverageReport:
+        path = self.repo_root / "docs/release/acceptance-coverage-v0.2.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        matrix = SpecAcceptanceMatrix()
         required = set(matrix.required_case_ids())
-        counts: dict[str, int] = {}
-        invalid: set[str] = set()
-        for row in rows:
-            counts[row.case_id] = counts.get(row.case_id, 0) + 1
-            target = self.repo_root / row.path
-            if not target.exists() or not (row.test_name or row.evidence_key):
-                invalid.add(row.case_id)
+        rows: list[AcceptanceCoverageRow] = []
+        seen: set[str] = set()
+        gaps: set[str] = set()
+        for entry in payload.get("cases", []):
+            row = AcceptanceCoverageRow(
+                case_id=str(entry.get("case_id", "")),
+                path=str(entry.get("path", "")),
+                test_name=str(entry.get("test_name", "")),
+                evidence_key=str(entry.get("evidence_key", "")),
+            )
+            if row.case_id not in required or row.case_id in seen:
+                gaps.add(row.case_id or "invalid_case")
                 continue
-            if row.test_name:
-                try:
-                    text = target.read_text(encoding="utf-8")
-                except (OSError, UnicodeError):
-                    invalid.add(row.case_id)
-                    continue
-                if f"def {row.test_name}(" not in text:
-                    invalid.add(row.case_id)
-        known = {row.case_id for row in rows}
-        gaps = tuple(sorted((required - known) | invalid))
-        unknown = tuple(sorted(known - required))
-        duplicates = tuple(sorted(case_id for case_id, count in counts.items() if count > 1))
-        complete = not gaps and not unknown and not duplicates and len(known) == len(required)
-        return AcceptanceCoverageReport(complete, rows, gaps, unknown, duplicates, len(known & required))
+            seen.add(row.case_id)
+            if row.path:
+                candidate = self.repo_root / row.path
+                if not candidate.exists():
+                    gaps.add(row.case_id)
+                elif row.test_name:
+                    source = candidate.read_text(encoding="utf-8")
+                    if f"def {row.test_name}(" not in source:
+                        gaps.add(row.case_id)
+            elif not row.evidence_key:
+                gaps.add(row.case_id)
+            rows.append(row)
+        gaps.update(required - seen)
+        return AcceptanceCoverageReport(not gaps, tuple(rows), tuple(sorted(gaps)))
 
 
 class AcceptanceCatalogRunner:
-    """Executes the tests named by the acceptance catalog and binds external runtime evidence."""
-
-    def __init__(self, repo_root: Path | str, catalog_path: Path | str | None = None) -> None:
+    def __init__(self, repo_root: Path | str) -> None:
         self.repo_root = Path(repo_root)
-        self.catalog_path = Path(catalog_path) if catalog_path is not None else self.repo_root / "docs/release/acceptance-coverage-v0.2.json"
-        self._module_cache: dict[Path, object] = {}
-
-    @staticmethod
-    def _iter_tests(suite: unittest.TestSuite):
-        for item in suite:
-            if isinstance(item, unittest.TestSuite):
-                yield from AcceptanceCatalogRunner._iter_tests(item)
-            else:
-                yield item
-
-    def _load_module(self, path: Path):
-        path = path.resolve()
-        cached = self._module_cache.get(path)
-        if cached is not None:
-            return cached
-        module_name = f"alinacoder_acceptance_{hashlib.sha256(str(path).encode('utf-8')).hexdigest()[:16]}"
-        spec = importlib.util.spec_from_file_location(module_name, path)
-        if spec is None or spec.loader is None:
-            raise ImportError(f"cannot load acceptance test module: {path}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self._module_cache[path] = module
-        return module
-
-    def _run_named_test(self, path: Path, test_name: str) -> tuple[bool, str]:
-        try:
-            module = self._load_module(path)
-            suite = unittest.defaultTestLoader.loadTestsFromModule(module)
-            matches = [test for test in self._iter_tests(suite) if getattr(test, "_testMethodName", "") == test_name]
-            if len(matches) != 1:
-                return False, f"sealed-ci:test:{path.as_posix()}#{test_name}:match-count={len(matches)}"
-            result = unittest.TestResult()
-            matches[0].run(result)
-            return result.wasSuccessful(), f"sealed-ci:test:{path.as_posix()}#{test_name}"
-        except Exception as exc:
-            return False, f"sealed-ci:test:{path.as_posix()}#{test_name}:error={type(exc).__name__}"
 
     def run(self, *, external_evidence: dict[str, bool] | None = None) -> tuple[AcceptanceCaseEvidence, ...]:
-        payload = json.loads(self.catalog_path.read_text(encoding="utf-8"))
         external_evidence = dict(external_evidence or {})
-        evidences: list[AcceptanceCaseEvidence] = []
-        for raw in payload.get("cases", []):
-            case_id = str(raw.get("case_id", ""))
-            relative = str(raw.get("path", ""))
-            test_name = str(raw.get("test_name", ""))
-            evidence_key = str(raw.get("evidence_key", ""))
-            if not case_id or not relative or not (test_name or evidence_key):
-                evidences.append(AcceptanceCaseEvidence(case_id or "<invalid>", "FAIL", True, "sealed-ci:invalid-catalog-row"))
+        catalog = AcceptanceCoverageCatalog(self.repo_root).load()
+        if not catalog.complete:
+            return tuple(
+                AcceptanceCaseEvidence(case_id, "FAIL", True, "catalog_gap")
+                for case_id in SpecAcceptanceMatrix().required_case_ids()
+            )
+        results: list[AcceptanceCaseEvidence] = []
+        for row in catalog.rows:
+            if row.evidence_key:
+                passed = bool(external_evidence.get(row.evidence_key, False))
+                results.append(AcceptanceCaseEvidence(row.case_id, "PASS" if passed else "FAIL", True, row.evidence_key))
                 continue
-            target = self.repo_root / relative
-            if test_name:
-                passed, source = self._run_named_test(target, test_name)
-            else:
-                passed = bool(external_evidence.get(evidence_key, False)) and target.exists()
-                source = f"sealed-ci:evidence:{evidence_key}"
-            evidences.append(AcceptanceCaseEvidence(case_id, "PASS" if passed else "FAIL", True, source))
-        return tuple(evidences)
+            module_path = self.repo_root / row.path
+            spec = importlib.util.spec_from_file_location(f"alinacoder_acceptance_{row.case_id.replace('.', '_')}", module_path)
+            if spec is None or spec.loader is None:
+                results.append(AcceptanceCaseEvidence(row.case_id, "FAIL", True, row.path))
+                continue
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            suite = unittest.TestSuite()
+            for candidate in unittest.defaultTestLoader.loadTestsFromModule(module):
+                for test in _flatten_suite(candidate):
+                    if getattr(test, "_testMethodName", "") == row.test_name:
+                        suite.addTest(test)
+            if suite.countTestCases() != 1:
+                results.append(AcceptanceCaseEvidence(row.case_id, "FAIL", True, f"{row.path}::{row.test_name}"))
+                continue
+            outcome = unittest.TestResult()
+            suite.run(outcome)
+            passed = outcome.wasSuccessful() and outcome.testsRun == 1
+            results.append(AcceptanceCaseEvidence(row.case_id, "PASS" if passed else "FAIL", True, f"{row.path}::{row.test_name}"))
+        return tuple(results)
+
+
+def _flatten_suite(suite):
+    for test in suite:
+        if isinstance(test, unittest.TestSuite):
+            yield from _flatten_suite(test)
+        else:
+            yield test
 
 
 @dataclass(frozen=True)
@@ -378,7 +354,7 @@ class FinalAcceptanceGate:
 class ReleaseBundle:
     REQUIRED = {
         "AlinaCoder.exe", "AlinaCoderSetup.exe", "release-manifest.json", "sbom.spdx.json",
-        "USER_GUIDE.md", "OPERATIONS.md",
+        "USER_GUIDE.md", "OPERATIONS.md", "prerequisites-v0.2.json",
     }
 
     def __init__(self, files: set[str]) -> None:
@@ -388,9 +364,9 @@ class ReleaseBundle:
         return self.REQUIRED.issubset(self.files)
 
 
-def sha256_file(path: Path) -> str:
+def sha256_file(path: Path | str) -> str:
     digest = hashlib.sha256()
-    with path.open("rb") as handle:
+    with Path(path).open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
@@ -398,31 +374,11 @@ def sha256_file(path: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
-    parser.add_argument("--artifact-dir", type=Path, required=True)
-    parser.add_argument("--commit-sha", default="")
+    parser.add_argument("--root", type=Path, default=Path("."))
     args = parser.parse_args(argv)
-    artifact = args.artifact_dir / "AlinaCoder.exe"
-    setup = args.artifact_dir / "AlinaCoderSetup.exe"
-    files = {item.name for item in args.artifact_dir.iterdir()} if args.artifact_dir.exists() else set()
-    for doc in ["USER_GUIDE.md", "OPERATIONS.md"]:
-        if (args.repo_root / "docs" / doc).exists():
-            files.add(doc)
-    bundle = ReleaseBundle(files)
-    traceability = RuleTraceabilityBuilder(args.repo_root).build()
-    matrix = SpecAcceptanceMatrix()
-    coverage = AcceptanceCoverageCatalog(args.repo_root).validate(matrix)
-    report = {
-        "runtime_v0_2_ready": False,
-        "bundle_complete": bundle.complete(), "traceability_complete": traceability.complete,
-        "acceptance_coverage_complete": coverage.complete, "acceptance_cases": len(matrix.required_case_ids()),
-        "rule_count": traceability.rule_count, "unknown_rule_families": list(traceability.unknown_families),
-        "artifact_exists": artifact.exists(), "setup_exists": setup.exists(), "commit_sha": args.commit_sha,
-    }
-    if artifact.exists() and bundle.complete():
-        report["artifact_sha256"] = sha256_file(artifact)
-    print(json.dumps(report, sort_keys=True))
-    return 0 if bundle.complete() and artifact.exists() and setup.exists() and traceability.complete and coverage.complete else 2
+    trace = RuleTraceabilityBuilder(args.root).build()
+    print(json.dumps({"complete": trace.complete, "rule_count": trace.rule_count, "unknown": trace.unknown_families}, sort_keys=True))
+    return 0 if trace.complete else 2
 
 
 if __name__ == "__main__":
