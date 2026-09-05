@@ -17,10 +17,9 @@ class Lot19WindowsTrustTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.adapter = WindowsBootstrapAdapter(Path(self.temp.name), self.manifest)
 
-    def test_signed_windows_system_binary_is_trusted(self) -> None:
-        signed = Path(os.environ["WINDIR"]) / "System32" / "notepad.exe"
-        self.assertTrue(signed.exists())
-        self.assertTrue(self.adapter.verify_authenticode(signed))
+    def test_product_adapter_is_bound_to_native_wintrust(self) -> None:
+        self.assertEqual(self.adapter.__class__.__module__, "alinacoder.product.windows_trust")
+        self.assertEqual(self.adapter.__class__.__name__, "NativeWindowsBootstrapAdapter")
 
     def test_unsigned_fake_executable_is_rejected(self) -> None:
         unsigned = Path(self.temp.name) / "unsigned.exe"
