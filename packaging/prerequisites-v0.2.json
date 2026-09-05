@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "product_version": "0.2.0",
+  "minimum_windows_major": 10,
+  "ollama": {
+    "minimum_version": "0.15.0",
+    "release_api": "https://api.github.com/repos/ollama/ollama/releases/latest",
+    "allowed_repository": "ollama/ollama",
+    "asset_name": "OllamaSetup.exe",
+    "endpoint": "http://127.0.0.1:11434"
+  },
+  "git": {
+    "minimum_version": "2.40.0",
+    "release_api": "https://api.github.com/repos/git-for-windows/git/releases/latest",
+    "allowed_repository": "git-for-windows/git",
+    "asset_regex": "^Git-[0-9.]+-64-bit\\.exe$"
+  },
+  "model_profiles": [
+    {
+      "name": "cpu-low",
+      "model": "qwen3:0.6b",
+      "minimum_ram_gb": 4,
+      "minimum_vram_gb": 0,
+      "minimum_free_disk_gb": 2,
+      "estimated_download_gb": 0.6,
+      "context_tokens": 40960
+    },
+    {
+      "name": "balanced",
+      "model": "qwen3:4b",
+      "minimum_ram_gb": 8,
+      "minimum_vram_gb": 0,
+      "minimum_free_disk_gb": 6,
+      "estimated_download_gb": 2.5,
+      "context_tokens": 262144
+    },
+    {
+      "name": "performance",
+      "model": "qwen3:8b",
+      "minimum_ram_gb": 16,
+      "minimum_vram_gb": 6,
+      "minimum_free_disk_gb": 10,
+      "estimated_download_gb": 5.2,
+      "context_tokens": 40960
+    },
+    {
+      "name": "workstation-coding",
+      "model": "qwen3-coder:30b",
+      "minimum_ram_gb": 32,
+      "minimum_vram_gb": 20,
+      "minimum_free_disk_gb": 28,
+      "estimated_download_gb": 19,
+      "context_tokens": 262144
+    }
+  ]
+}
