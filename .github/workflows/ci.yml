@@ -94,49 +94,148 @@ jobs:
           if ($proc.ExitCode -ne 0) { throw "packaged self-test failed with exit code $($proc.ExitCode)" }
           $semantic = Start-Process -FilePath ".\dist\AlinaCoder.exe" -ArgumentList "--semantic-ui" -Wait -PassThru
           if ($semantic.ExitCode -ne 0) { throw "packaged semantic UI oracle failed with exit code $($semantic.ExitCode)" }
-      - name: Install, repair, run packaged mission, and uninstall
+
+      - name: LOT 19 clean Windows bootstrap E2E and lifecycle matrix
         shell: pwsh
+        env:
+          PYTHONPATH: src
         run: |
-          $dest = Join-Path $env:RUNNER_TEMP "AlinaCoderRC"
+          $ErrorActionPreference = "Stop"
+          $dest = Join-Path $env:RUNNER_TEMP "AlinaCoderLot19Clean"
+          $offlineDest = Join-Path $env:RUNNER_TEMP "AlinaCoderLot19Offline"
+          $preexistingDest = Join-Path $env:RUNNER_TEMP "AlinaCoderLot19PreExisting"
           $fixture = Join-Path $env:RUNNER_TEMP "AlinaCoderAcceptanceRepo"
-          $evidence = Join-Path $env:RUNNER_TEMP "desktop-acceptance-evidence.json"
-          Remove-Item -Recurse -Force $dest,$fixture -ErrorAction SilentlyContinue
-          .\dist\AlinaCoderSetup.exe --quiet --install-dir $dest
-          if ($LASTEXITCODE -ne 0) { throw "installer failed with exit code $LASTEXITCODE" }
-          Set-Content -Path (Join-Path $dest "user-state.json") -Value '{"preserve":true}' -Encoding utf8
-          .\dist\AlinaCoderSetup.exe --repair --quiet --install-dir $dest
-          if ($LASTEXITCODE -ne 0) { throw "repair failed with exit code $LASTEXITCODE" }
-          if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "repair removed user data" }
-          $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--self-test" -Wait -PassThru
-          if ($proc.ExitCode -ne 0) { throw "installed self-test failed with exit code $($proc.ExitCode)" }
-          $semantic = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--semantic-ui" -Wait -PassThru
-          if ($semantic.ExitCode -ne 0) { throw "installed semantic UI oracle failed with exit code $($semantic.ExitCode)" }
-          @{ok=$true; source="installed AlinaCoder.exe --semantic-ui"; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content .\dist\semantic-ui-evidence.json -Encoding utf8
+          $desktopEvidence = Join-Path $env:RUNNER_TEMP "desktop-acceptance-evidence.json"
+          $systemGit = Join-Path $env:ProgramFiles "Git"
+          $hiddenGit = Join-Path $env:RUNNER_TEMP "SystemGitHiddenForLot19"
+          $originalPath = $env:PATH
+          $gitWasHidden = $false
+          $scenario = [ordered]@{}
+          Remove-Item -Recurse -Force $dest,$offlineDest,$preexistingDest,$fixture,$hiddenGit -ErrorAction SilentlyContinue
 
-          New-Item -ItemType Directory -Path $fixture | Out-Null
-          git -C $fixture init -b main
-          git -C $fixture config user.email "alinacoder-ci@example.invalid"
-          git -C $fixture config user.name "AlinaCoder CI"
-          Set-Content -Path (Join-Path $fixture "README.md") -Value "# AlinaCoder acceptance fixture" -Encoding utf8
-          git -C $fixture add README.md
-          git -C $fixture commit -m "fixture baseline"
-          $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList @("--acceptance-e2e","--workspace",$fixture,"--evidence-out",$evidence) -Wait -PassThru
-          if ($proc.ExitCode -ne 0) { throw "packaged acceptance mission failed with exit code $($proc.ExitCode)" }
-          $mission = Get-Content $evidence -Raw | ConvertFrom-Json
-          if (-not $mission.ok) { throw "packaged acceptance evidence did not pass" }
-          if ($mission.branch -ne "main") { throw "packaged mission left main branch" }
-          Copy-Item $evidence .\dist\desktop-acceptance-evidence.json
+          try {
+            # The hosted image contains Git by default. Hide it for this step so the packaged
+            # setup sees the same prerequisite closure as a clean end-user Windows machine.
+            if (Test-Path $systemGit) {
+              Move-Item -LiteralPath $systemGit -Destination $hiddenGit
+              $gitWasHidden = $true
+            }
+            $env:PATH = (($originalPath -split ';') | Where-Object { $_ -and ($_ -notmatch '(?i)\\Git(\\|$)') }) -join ';'
+            if (Get-Command git.exe -ErrorAction SilentlyContinue) { throw "clean-machine precondition failed: Git is still discoverable" }
+            if (Get-Command ollama.exe -ErrorAction SilentlyContinue) { throw "clean-machine precondition failed: Ollama is already present on runner" }
 
-          .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $dest
-          if ($LASTEXITCODE -ne 0) { throw "uninstaller failed with exit code $LASTEXITCODE" }
-          if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left executable behind" }
-          if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "uninstall violated user-data retention policy" }
-          @{ok=$true; source="clean Windows install/repair/e2e/uninstall"; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content .\dist\windows-clean-install-evidence.json -Encoding utf8
+            # Real packaged offline failure: no false success and a resumable receipt.
+            & .\dist\AlinaCoderSetup.exe --quiet --offline --install-dir $offlineDest --model qwen3:0.6b
+            $offlineExit = $LASTEXITCODE
+            if ($offlineExit -eq 0) { throw "offline clean bootstrap incorrectly reported success" }
+            $offlineMeta = Get-Content (Join-Path $offlineDest "install.json") -Raw | ConvertFrom-Json
+            if ($offlineMeta.bootstrap_ready) { throw "offline clean bootstrap wrote ready=true" }
+            $scenario.network_interruption = @{ok=$true; source="packaged setup --offline fail-closed; resumed by online setup"; exit=$offlineExit}
+
+            # Real zero-touch bootstrap from the exact packaged setup. This must install Git,
+            # Ollama and the explicitly CPU-safe model from verified official releases.
+            & .\dist\AlinaCoderSetup.exe --quiet --install-dir $dest --model qwen3:0.6b
+            if ($LASTEXITCODE -ne 0) { throw "zero-touch clean bootstrap failed with exit code $LASTEXITCODE" }
+            $managedGit = Join-Path $env:LOCALAPPDATA "Programs\Git\cmd\git.exe"
+            $managedOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+            if (-not (Test-Path $managedGit)) { throw "Git was not installed by zero-touch bootstrap" }
+            if (-not (Test-Path $managedOllama)) { throw "Ollama was not installed by zero-touch bootstrap" }
+            $env:PATH = "$(Split-Path $managedGit);$(Split-Path $managedOllama);$env:PATH"
+
+            python scripts/verify_lot19_bootstrap.py --install-dir $dest --artifact .\dist\AlinaCoder.exe --commit $env:GITHUB_SHA --model qwen3:0.6b --out .\dist\lot19-bootstrap-evidence.json
+            if ($LASTEXITCODE -ne 0) { throw "independent LOT 19 bootstrap verifier failed" }
+            $bootstrap = Get-Content .\dist\lot19-bootstrap-evidence.json -Raw | ConvertFrom-Json
+            if (-not $bootstrap.bootstrap_e2e -or -not $bootstrap.real_inference) { throw "bootstrap_e2e did not prove real local inference" }
+            $scenario.clean_machine = @{ok=$true; source="exact AlinaCoderSetup.exe + independent real Ollama inference"; artifact_sha256=$bootstrap.artifact_sha256}
+            $scenario.cpu_only_low_resource = @{ok=$true; source="live qwen3:0.6b CPU-safe smoke + same-SHA hardware-fit unit contract"; model="qwen3:0.6b"}
+
+            # Recovery of the previously deferred/offline install now that verified prerequisites exist.
+            & .\dist\AlinaCoderSetup.exe --repair --quiet --install-dir $offlineDest --model qwen3:0.6b
+            if ($LASTEXITCODE -ne 0) { throw "offline bootstrap recovery failed" }
+            $offlineRecovered = Get-Content (Join-Path $offlineDest "install.json") -Raw | ConvertFrom-Json
+            if (-not $offlineRecovered.bootstrap_ready) { throw "offline bootstrap did not recover to ready" }
+
+            # Compatible pre-existing dependencies: a second AlinaCoder install must classify
+            # Git/Ollama as user-owned and its uninstall must not remove them or the model.
+            & .\dist\AlinaCoderSetup.exe --quiet --install-dir $preexistingDest --model qwen3:0.6b
+            if ($LASTEXITCODE -ne 0) { throw "pre-existing prerequisite setup failed" }
+            $preState = Get-Content (Join-Path $preexistingDest "bootstrap-state.json") -Raw | ConvertFrom-Json
+            if ($preState.components.git.origin -ne "pre_existing") { throw "pre-existing Git ownership was not preserved" }
+            if ($preState.components.ollama.origin -ne "pre_existing") { throw "pre-existing Ollama ownership was not preserved" }
+            & .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $preexistingDest
+            if ($LASTEXITCODE -ne 0) { throw "pre-existing scenario uninstall failed" }
+            if (-not (Test-Path $managedGit) -or -not (Test-Path $managedOllama)) { throw "pre-existing dependencies were removed" }
+            $modelsAfter = & $managedOllama list
+            if ($LASTEXITCODE -ne 0 -or ($modelsAfter -notmatch 'qwen3:0.6b')) { throw "pre-existing model was not preserved" }
+            $scenario.preexisting_compatible = @{ok=$true; source="second packaged install + ownership receipts + uninstall preservation"}
+
+            # Exact production contracts for incompatible upgrade, CPU fit and interrupted pull.
+            python -m unittest discover -s tests -p "test_lot19_bootstrap.py" -v
+            if ($LASTEXITCODE -ne 0) { throw "LOT 19 scenario contract tests failed" }
+            python -m unittest discover -s tests -p "test_lot19_installer_integration.py" -v
+            if ($LASTEXITCODE -ne 0) { throw "LOT 19 installer integration tests failed" }
+            $scenario.incompatible_upgrade = @{ok=$true; source="same-SHA production planner/integration: old Ollama upgrades, anti-downgrade, user ownership"}
+
+            # Full packaged lifecycle on the managed clean installation. Upgrade is intentionally
+            # same-channel/no-op; provenance retention makes rollback deterministic and exact.
+            Set-Content -Path (Join-Path $dest "user-state.json") -Value '{"preserve":true}' -Encoding utf8
+            & .\dist\AlinaCoderSetup.exe --repair --quiet --install-dir $dest --model qwen3:0.6b
+            if ($LASTEXITCODE -ne 0) { throw "repair failed with exit code $LASTEXITCODE" }
+            & .\dist\AlinaCoderSetup.exe --upgrade --quiet --install-dir $dest --model qwen3:0.6b
+            if ($LASTEXITCODE -ne 0) { throw "upgrade failed with exit code $LASTEXITCODE" }
+            & .\dist\AlinaCoderSetup.exe --rollback --quiet --install-dir $dest
+            if ($LASTEXITCODE -ne 0) { throw "rollback failed with exit code $LASTEXITCODE" }
+            if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "lifecycle removed user data" }
+
+            $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--self-test" -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "installed self-test failed with exit code $($proc.ExitCode)" }
+            $semantic = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--semantic-ui" -Wait -PassThru
+            if ($semantic.ExitCode -ne 0) { throw "installed semantic UI oracle failed with exit code $($semantic.ExitCode)" }
+            @{ok=$true; source="installed AlinaCoder.exe --semantic-ui"; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content .\dist\semantic-ui-evidence.json -Encoding utf8
+
+            New-Item -ItemType Directory -Path $fixture | Out-Null
+            & $managedGit -C $fixture init -b main
+            & $managedGit -C $fixture config user.email "alinacoder-ci@example.invalid"
+            & $managedGit -C $fixture config user.name "AlinaCoder CI"
+            Set-Content -Path (Join-Path $fixture "README.md") -Value "# AlinaCoder acceptance fixture" -Encoding utf8
+            & $managedGit -C $fixture add README.md
+            & $managedGit -C $fixture commit -m "fixture baseline"
+            $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList @("--acceptance-e2e","--workspace",$fixture,"--evidence-out",$desktopEvidence) -Wait -PassThru
+            if ($proc.ExitCode -ne 0) { throw "packaged acceptance mission failed with exit code $($proc.ExitCode)" }
+            $mission = Get-Content $desktopEvidence -Raw | ConvertFrom-Json
+            if (-not $mission.ok -or $mission.branch -ne "main") { throw "packaged acceptance mission evidence failed" }
+            Copy-Item $desktopEvidence .\dist\desktop-acceptance-evidence.json
+
+            & .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $dest
+            if ($LASTEXITCODE -ne 0) { throw "uninstaller failed with exit code $LASTEXITCODE" }
+            if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left application executable behind" }
+            if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "uninstall violated user-data retention policy" }
+            $scenario.lifecycle = @{ok=$true; source="packaged install→repair→upgrade→rollback→mission→uninstall"}
+            @{ok=$true; source="LOT19 clean Windows + lifecycle matrix"; commit=$env:GITHUB_SHA} | ConvertTo-Json | Set-Content .\dist\windows-clean-install-evidence.json -Encoding utf8
+
+            $matrix = @{
+              ok = (($scenario.Values | Where-Object { -not $_.ok }).Count -eq 0)
+              commit_sha = $env:GITHUB_SHA
+              artifact_sha256 = $bootstrap.artifact_sha256
+              scenarios = $scenario
+            }
+            $matrix | ConvertTo-Json -Depth 8 | Set-Content .\dist\lot19-scenario-matrix.json -Encoding utf8
+            if (-not $matrix.ok) { throw "LOT 19 scenario matrix is incomplete" }
+          }
+          finally {
+            $env:PATH = $originalPath
+            if ($gitWasHidden -and (Test-Path $hiddenGit)) {
+              if (Test-Path $systemGit) { Remove-Item -Recurse -Force $systemGit }
+              Move-Item -LiteralPath $hiddenGit -Destination $systemGit
+            }
+          }
+
       - name: Verify release bundle provenance
         shell: pwsh
         env:
           PYTHONPATH: src
         run: python scripts/verify_release.py --dist dist --commit $env:GITHUB_SHA
+
       - name: Seal final v0.2 acceptance evidence
         shell: pwsh
         env:
@@ -165,6 +264,20 @@ jobs:
           desktop = json.loads((dist / 'desktop-acceptance-evidence.json').read_text(encoding='utf-8-sig'))
           clean_install = json.loads((dist / 'windows-clean-install-evidence.json').read_text(encoding='utf-8-sig'))
           semantic_ui = json.loads((dist / 'semantic-ui-evidence.json').read_text(encoding='utf-8-sig'))
+          bootstrap = json.loads((dist / 'lot19-bootstrap-evidence.json').read_text(encoding='utf-8-sig'))
+          lot19_matrix = json.loads((dist / 'lot19-scenario-matrix.json').read_text(encoding='utf-8-sig'))
+          bootstrap_e2e = bool(
+              bootstrap.get('ok')
+              and bootstrap.get('bootstrap_e2e')
+              and bootstrap.get('real_inference')
+              and bootstrap.get('commit_sha') == commit
+              and bootstrap.get('artifact_sha256') == digest
+              and lot19_matrix.get('ok')
+              and lot19_matrix.get('commit_sha') == commit
+              and lot19_matrix.get('artifact_sha256') == digest
+              and len(lot19_matrix.get('scenarios', {})) == 6
+              and all(item.get('ok') for item in lot19_matrix.get('scenarios', {}).values())
+          )
           provenance_ok = all(
               (dist / name).exists() and (dist / name).stat().st_size > 2
               for name in (
@@ -178,7 +291,7 @@ jobs:
           matrix = SpecAcceptanceMatrix()
           case_evidences = AcceptanceCatalogRunner(root).run(
               external_evidence={
-                  'windows.clean_install': bool(clean_install.get('ok')),
+                  'windows.clean_install': bool(clean_install.get('ok')) and bootstrap_e2e,
                   'desktop.semantic_ui': bool(semantic_ui.get('ok')),
               }
           )
@@ -188,11 +301,12 @@ jobs:
               AcceptanceEvidence('desktop_e2e', 'PASS' if desktop.get('ok') else 'FAIL', commit, digest, True, source='packaged-e2e'),
               AcceptanceEvidence('torture', 'PASS' if torture.readiness.ready else 'FAIL', commit, digest, True, source='integrated-torture'),
               AcceptanceEvidence('provenance', 'PASS' if provenance_ok else 'FAIL', commit, digest, True, source='github-attestation'),
-              AcceptanceEvidence('final_audit', 'PASS' if trace.complete and matrix_report.passed else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
+              AcceptanceEvidence('bootstrap_e2e', 'PASS' if bootstrap_e2e else 'FAIL', commit, digest, True, source='lot19-clean-windows'),
+              AcceptanceEvidence('final_audit', 'PASS' if trace.complete and matrix_report.passed and bootstrap_e2e else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
           ]
           result = FinalAcceptanceGate(
               trace,
-              ('core','desktop_e2e','torture','provenance','final_audit'),
+              ('core','desktop_e2e','torture','provenance','bootstrap_e2e','final_audit'),
               commit_sha=commit,
               artifact_sha256=digest,
               acceptance_matrix=matrix,
@@ -217,6 +331,9 @@ jobs:
               'rule_count': trace.rule_count,
               'torture_score': torture.readiness.score,
               'desktop_e2e': bool(desktop.get('ok')),
+              'bootstrap_e2e': bootstrap_e2e,
+              'lot19_scenarios_passed': sum(1 for item in lot19_matrix.get('scenarios', {}).values() if item.get('ok')),
+              'lot19_scenarios_required': 6,
               'provenance_verified': provenance_ok,
               'acceptance_cases_passed': matrix_report.passed_cases,
               'acceptance_cases_required': matrix_report.required_cases,
@@ -228,6 +345,7 @@ jobs:
           print(json.dumps(report, sort_keys=True))
           raise SystemExit(0 if result.runtime_v0_2_ready else 2)
           '@ | python -
+
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: AlinaCoder-v0.2-rc-${{ github.sha }}
@@ -236,11 +354,14 @@ jobs:
             dist/AlinaCoderSetup.exe
             dist/release-manifest.json
             dist/sbom.spdx.json
+            dist/prerequisites-v0.2.json
             dist/USER_GUIDE.md
             dist/OPERATIONS.md
             dist/desktop-acceptance-evidence.json
             dist/semantic-ui-evidence.json
             dist/windows-clean-install-evidence.json
+            dist/lot19-bootstrap-evidence.json
+            dist/lot19-scenario-matrix.json
             dist/provenance-verification.json
             dist/setup-provenance-verification.json
             dist/sbom-attestation-verification.json
