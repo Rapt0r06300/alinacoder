@@ -94,6 +94,47 @@ jobs:
         env:
           PYTHONPATH: src
         run: python scripts/verify_release.py --dist dist --commit $env:GITHUB_SHA
+      - name: Seal final v0.2 acceptance evidence
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: |
+          @'
+          import json
+          import os
+          from pathlib import Path
+          from alinacoder.evaluation.torture import IntegratedTortureHarness
+          from alinacoder.release.acceptance import AcceptanceEvidence, FinalAcceptanceGate, RuleTraceabilityBuilder, sha256_file
+
+          root = Path('.')
+          artifact = root / 'dist' / 'AlinaCoder.exe'
+          commit = os.environ['GITHUB_SHA']
+          digest = sha256_file(artifact)
+          desktop = json.loads((root / 'dist' / 'desktop-acceptance-evidence.json').read_text(encoding='utf-8'))
+          torture = IntegratedTortureHarness(seed=f'ci:{commit}').run()
+          trace = RuleTraceabilityBuilder(root).build()
+          evidences = [
+              AcceptanceEvidence('core', 'PASS', commit, digest, True, source='github-actions'),
+              AcceptanceEvidence('desktop_e2e', 'PASS' if desktop.get('ok') else 'FAIL', commit, digest, True, source='packaged-e2e'),
+              AcceptanceEvidence('torture', 'PASS' if torture.readiness.ready else 'FAIL', commit, digest, True, source='integrated-torture'),
+              AcceptanceEvidence('final_audit', 'PASS' if trace.complete else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
+          ]
+          result = FinalAcceptanceGate(trace, ('core','desktop_e2e','torture','final_audit'), commit_sha=commit, artifact_sha256=digest).evaluate(evidences)
+          report = {
+              'runtime_v0_2_ready': result.runtime_v0_2_ready,
+              'commit_sha': commit,
+              'artifact_sha256': digest,
+              'traceability_complete': trace.complete,
+              'rule_count': trace.rule_count,
+              'torture_score': torture.readiness.score,
+              'desktop_e2e': bool(desktop.get('ok')),
+              'missing_or_invalid_evidence': list(result.missing_or_invalid_evidence),
+              'failures': list(result.failures),
+          }
+          Path('dist/final-acceptance-evidence.json').write_text(json.dumps(report, indent=2, sort_keys=True), encoding='utf-8')
+          print(json.dumps(report, sort_keys=True))
+          raise SystemExit(0 if result.runtime_v0_2_ready else 2)
+          '@ | python -
       - uses: actions/upload-artifact@v4
         with:
           name: AlinaCoder-v0.2-rc-${{ github.sha }}
@@ -105,4 +146,5 @@ jobs:
             dist/USER_GUIDE.md
             dist/OPERATIONS.md
             dist/desktop-acceptance-evidence.json
+            dist/final-acceptance-evidence.json
           if-no-files-found: error
