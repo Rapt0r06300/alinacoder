@@ -166,7 +166,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "pre-existing scenario uninstall failed" }
             if (-not (Test-Path $managedGit) -or -not (Test-Path $managedOllama)) { throw "pre-existing dependencies were removed" }
             $modelsAfter = & $managedOllama list
-            if ($LASTEXITCODE -ne 0 -or ($modelsAfter -notmatch 'qwen3:0.6b')) { throw "pre-existing model was not preserved" }
+            $modelsAfterText = ($modelsAfter -join "`n")
+            if ($LASTEXITCODE -ne 0 -or $modelsAfterText -notmatch 'qwen3:0.6b') { throw "pre-existing model was not preserved" }
             $scenario.preexisting_compatible = @{ok=$true; source="second packaged install + ownership receipts + uninstall preservation"}
 
             # Exact production contracts for incompatible upgrade, CPU fit and interrupted pull.
