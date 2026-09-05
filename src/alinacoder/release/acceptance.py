@@ -105,6 +105,134 @@ class RuleTraceabilityBuilder:
 
 
 @dataclass(frozen=True)
+class AcceptanceCaseEvidence:
+    case_id: str
+    verdict: str
+    fresh: bool
+    source: str
+
+
+@dataclass(frozen=True)
+class SpecAcceptanceMatrixReport:
+    passed: bool
+    missing: tuple[str, ...]
+    invalid: tuple[str, ...]
+    unknown: tuple[str, ...]
+    passed_cases: int
+    required_cases: int
+
+
+class SpecAcceptanceMatrix:
+    """Executable representation of the complete v0.2 section-18 acceptance matrix."""
+
+    families: dict[str, tuple[str, ...]] = {
+        "conversation": (
+            "evolving_intent",
+            "correction_negation",
+            "branch_isolation",
+            "deictic_visible_references",
+            "clarification_stopping",
+            "user_preference_revision",
+            "repeated_correction_no_repeat_violation",
+            "french_noisy_hesitant_input",
+        ),
+        "repository_engineering": (
+            "multi_file_bug_repair",
+            "feature_addition",
+            "dependency_sensitive_refactor",
+            "implicit_requirement_recovery",
+            "test_generation_use",
+            "regression_detection",
+            "partial_failure_recovery",
+            "long_horizon_no_premature_stop",
+        ),
+        "control_safety": (
+            "stale_response_rejection",
+            "cancellation_fencing",
+            "stale_patch_rejection",
+            "effect_idempotency",
+            "untrusted_repo_instructions_are_data",
+            "memory_promotion_governance",
+            "exact_main_enforcement",
+        ),
+        "provider_fabric": (
+            "free_route_disappears",
+            "quota_exhausted",
+            "model_alias_changes",
+            "provider_timeout",
+            "same_lineage_failover",
+            "cognitive_failover",
+            "no_eligible_cloud_route",
+            "local_only_fallback",
+            "zero_paid_calls",
+        ),
+        "continuity": (
+            "process_crash",
+            "restart_during_mission",
+            "model_switch",
+            "user_correction_in_flight",
+            "partial_stream_failure",
+            "recovery_without_duplicate_effect",
+        ),
+        "desktop_ux": (
+            "clean_first_run",
+            "ordinary_chat_without_advanced_panels",
+            "pause_resume",
+            "all_stop",
+            "plan_artifact_selection",
+            "targeted_edit_continue",
+            "verification_visibility",
+            "low_idle_resource_use",
+        ),
+    }
+
+    def required_case_ids(self) -> tuple[str, ...]:
+        return tuple(
+            f"{family}.{case}"
+            for family, cases in self.families.items()
+            for case in cases
+        )
+
+    def evaluate(
+        self,
+        evidences: list[AcceptanceCaseEvidence] | tuple[AcceptanceCaseEvidence, ...],
+    ) -> SpecAcceptanceMatrixReport:
+        required = self.required_case_ids()
+        required_set = set(required)
+        by_case: dict[str, AcceptanceCaseEvidence] = {}
+        unknown: set[str] = set()
+        for evidence in evidences:
+            if evidence.case_id not in required_set:
+                unknown.add(evidence.case_id)
+                continue
+            by_case[evidence.case_id] = evidence
+        missing = tuple(case_id for case_id in required if case_id not in by_case)
+        invalid = tuple(
+            case_id
+            for case_id in required
+            if case_id in by_case
+            and (by_case[case_id].verdict != "PASS" or not by_case[case_id].fresh or not by_case[case_id].source)
+        )
+        passed_cases = sum(
+            1
+            for case_id in required
+            if case_id in by_case
+            and by_case[case_id].verdict == "PASS"
+            and by_case[case_id].fresh
+            and bool(by_case[case_id].source)
+        )
+        unknown_tuple = tuple(sorted(unknown))
+        return SpecAcceptanceMatrixReport(
+            passed=not missing and not invalid and not unknown_tuple,
+            missing=missing,
+            invalid=invalid,
+            unknown=unknown_tuple,
+            passed_cases=passed_cases,
+            required_cases=len(required),
+        )
+
+
+@dataclass(frozen=True)
 class AcceptanceEvidence:
     name: str
     verdict: str
