@@ -44,7 +44,7 @@ class Lot06ConversationTests(unittest.TestCase):
     def test_playback_interrupt_commits_only_heard_prefix_to_common_ground(self) -> None:
         ledger = PlaybackLedger()
         playback = ledger.start("p1", "Je vais modifier trois fichiers puis lancer les tests")
-        ledger.commit_heard(playback.playback_id, 18)
+        ledger.commit_heard(playback.playback_id, 19)
         ledger.interrupt(playback.playback_id)
         heard = ledger.heard_text(playback.playback_id)
         self.assertEqual(heard, "Je vais modifier tr")
