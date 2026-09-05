@@ -114,6 +114,38 @@ class Lot19InstallerLifecycleIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(fake.adapter.persisted)
         self.assertEqual(fake.adapter.persisted.state.components["ollama"].origin, "pre_existing")
 
+    def test_repair_retains_managed_source_and_digest_for_future_rollback(self) -> None:
+        prior = p.ComponentReceipt(
+            "ollama", "0.33.3", "managed_by_alinacoder",
+            "https://github.com/ollama/ollama/releases/download/v0.33.3/OllamaSetup.exe",
+            "d" * 64, True, path="C:/Local/Ollama/ollama.exe",
+        )
+        prior_state = p.BootstrapState({"ollama": prior}, "qwen3:0.6b", True)
+        blank = p.ComponentReceipt("ollama", "0.33.3", "managed_by_alinacoder", "", "", True, path=prior.path)
+        report = p.BootstrapReport(True, "qwen3:0.6b", (), (), p.BootstrapState({"ollama": blank}, "qwen3:0.6b", True))
+
+        class FakeAdapter:
+            def __init__(self): self.persisted = None
+            def detect_inventory(self):
+                item = p.InstalledComponent("ollama", "0.33.3", "managed_by_alinacoder", prior.path)
+                return p.ComponentInventory(None, item, frozenset({"qwen3:0.6b"}))
+            def load_state(self): return prior_state
+            def persist_report(self, value): self.persisted = value
+
+        class FakeBootstrapper:
+            def __init__(self): self.adapter = FakeAdapter()
+            def run(self, **kwargs): return report
+
+        fake = FakeBootstrapper()
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source = root / "app.exe"
+            source.write_bytes(b"app")
+            installer.repair(root / "dest", source_exe=source, bootstrapper=fake)
+        saved = fake.adapter.persisted.state.components["ollama"]
+        self.assertEqual(saved.source_url, prior.source_url)
+        self.assertEqual(saved.sha256, prior.sha256)
+
     def test_normal_uninstall_does_not_request_external_prerequisite_removal(self) -> None:
         class FakeBootstrapper:
             def managed_uninstall(self, purge=False):
