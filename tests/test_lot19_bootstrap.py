@@ -144,7 +144,7 @@ class Lot19BootstrapBehaviorTests(unittest.TestCase):
             def __init__(self): self.pull_calls = 0; self.installs = []
             def detect_machine(self): return self_outer.machine(ram=4, vram=0, disk=5)
             def detect_inventory(self):
-                models = frozenset({"qwen3:0.6b"}) if self.pull_calls > 0 else frozenset()
+                models = frozenset({"qwen3:0.6b"}) if self.pull_calls > 1 else frozenset()
                 return self_outer.m.ComponentInventory(
                     git=self_outer.component("git", "2.51.0"),
                     ollama=self_outer.component("ollama", "0.33.3"), models=models)
