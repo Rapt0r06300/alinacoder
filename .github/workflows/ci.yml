@@ -136,7 +136,7 @@ jobs:
             # Ollama and the explicitly CPU-safe model from verified official releases.
             & .\dist\AlinaCoderSetup.exe --quiet --install-dir $dest --model qwen3:0.6b
             if ($LASTEXITCODE -ne 0) { throw "zero-touch clean bootstrap failed with exit code $LASTEXITCODE" }
-            $managedGit = Join-Path $env:LOCALAPPDATA "Programs\Git\cmd\git.exe"
+            $managedGit = Join-Path $env:LOCALAPPDATA "Programs\AlinaCoder\Git\cmd\git.exe"
             $managedOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
             if (-not (Test-Path $managedGit)) { throw "Git was not installed by zero-touch bootstrap" }
             if (-not (Test-Path $managedOllama)) { throw "Ollama was not installed by zero-touch bootstrap" }
