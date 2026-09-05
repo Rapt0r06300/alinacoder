@@ -41,6 +41,12 @@ class DesktopWorkbench:
     def close(self) -> None:
         self.store.close()
 
+    def __enter__(self) -> "DesktopWorkbench":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
     def _mutate(self, event_kind: str, mutate, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         state = self.store.get_state(self.session_id)
         data = deepcopy(state.data)
@@ -161,7 +167,8 @@ class DesktopWorkbench:
 
     def commit_main(self, message: str) -> dict[str, Any]:
         result = self.git.commit_all(self.workspace, message)
-        return self._receipt("commit_main", True, result)
+        self._receipt("commit_main", bool(result.get("ok")), result)
+        return dict(result)
 
     def status(self) -> dict[str, Any]:
         branch = self.git.current_branch(self.workspace)
