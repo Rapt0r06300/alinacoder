@@ -19,9 +19,10 @@ def sha256(path: Path) -> str:
 def post_generate(endpoint: str, model: str) -> dict:
     payload = json.dumps({
         "model": model,
-        "prompt": "Reply with one short word confirming the runtime is alive.",
+        "prompt": "Reply only with OK.",
+        "think": False,
         "stream": False,
-        "options": {"num_predict": 12},
+        "options": {"num_predict": 16},
     }).encode("utf-8")
     request = urllib.request.Request(
         endpoint.rstrip("/") + "/api/generate",
