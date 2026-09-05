@@ -52,14 +52,19 @@ jobs:
         run: python scripts/generate_release_metadata.py
       - name: Smoke packaged application
         shell: pwsh
-        run: .\dist\AlinaCoder.exe --self-test
+        run: |
+          $proc = Start-Process -FilePath ".\dist\AlinaCoder.exe" -ArgumentList "--self-test" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "packaged self-test failed with exit code $($proc.ExitCode)" }
       - name: Install, run, uninstall on clean temp destination
         shell: pwsh
         run: |
           $dest = Join-Path $env:RUNNER_TEMP "AlinaCoder-RC"
           .\dist\AlinaCoderSetup.exe --quiet --install-dir $dest
-          & (Join-Path $dest "AlinaCoder.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "installer failed with exit code $LASTEXITCODE" }
+          $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--self-test" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "installed self-test failed with exit code $($proc.ExitCode)" }
           .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $dest
+          if ($LASTEXITCODE -ne 0) { throw "uninstaller failed with exit code $LASTEXITCODE" }
           if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left executable behind" }
       - name: Verify release bundle provenance
         shell: pwsh
