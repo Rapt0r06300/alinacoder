@@ -7,34 +7,60 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-python-signature-wrapper:
+  diagnose-winverifytrust:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
-      - name: Show exact Python wrapper output
+      - name: Show exact native trust status
         shell: pwsh
         env:
           PYTHONPATH: src
         run: |
-          $url = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe"
-          $file = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe.partial"
-          Invoke-WebRequest -Uri $url -OutFile $file
-          $env:LOT19_SIGNED_FILE = $file
           @'
+          import ctypes
           import os
+          from ctypes import wintypes
           from pathlib import Path
+          import alinacoder.product.windows_trust as wt
           from alinacoder.product.prerequisites import PrerequisiteManifest, WindowsBootstrapAdapter
+
+          path = Path(os.environ['WINDIR']) / 'System32' / 'notepad.exe'
+          print('PATH', path, path.exists())
+          print('FILE_INFO_SIZE', ctypes.sizeof(wt._WINTRUST_FILE_INFO))
+          print('TRUST_DATA_SIZE', ctypes.sizeof(wt._WINTRUST_DATA))
+          print('GUID_SIZE', ctypes.sizeof(wt._GUID))
+
+          def data_for(p):
+              fi = wt._WINTRUST_FILE_INFO()
+              fi.cbStruct = ctypes.sizeof(wt._WINTRUST_FILE_INFO)
+              fi.pcwszFilePath = str(p.resolve())
+              fi.hFile = None
+              fi.pgKnownSubject = None
+              td = wt._WINTRUST_DATA()
+              td.cbStruct = ctypes.sizeof(wt._WINTRUST_DATA)
+              td.dwUIChoice = 2
+              td.fdwRevocationChecks = 0
+              td.dwUnionChoice = 1
+              td.pFile = ctypes.pointer(fi)
+              td.dwStateAction = 0
+              td.dwProvFlags = 0
+              td.dwUIContext = 0
+              return fi, td
+
+          fn = ctypes.windll.wintrust.WinVerifyTrust
+          fn.argtypes = [wintypes.HWND, ctypes.POINTER(wt._GUID), wintypes.LPVOID]
+          fn.restype = ctypes.c_long
+          for label, hwnd in [('NULL', None), ('INVALID', wintypes.HWND(-1))]:
+              fi, td = data_for(path)
+              status = fn(hwnd, ctypes.byref(wt._WINTRUST_ACTION_GENERIC_VERIFY_V2), ctypes.byref(td))
+              print(label, 'STATUS_DEC', status, 'STATUS_HEX', hex(ctypes.c_uint32(status).value))
+
           manifest = PrerequisiteManifest.load(Path('packaging/prerequisites-v0.2.json'))
-          adapter = WindowsBootstrapAdapter(Path(os.environ['RUNNER_TEMP'])/'lot19-wrapper', manifest)
-          path = Path(os.environ['LOT19_SIGNED_FILE'])
-          escaped = str(path).replace("'", "''")
-          command = ['powershell.exe','-NoProfile','-NonInteractive','-Command',f"(Get-AuthenticodeSignature -LiteralPath '{escaped}').Status.ToString()"]
-          code, output = adapter._run(command, timeout=60)
-          print('CODE_REPR=', repr(code))
-          print('OUTPUT_REPR=', repr(output))
-          print('STRIPPED_REPR=', repr(output.strip().lower()))
-          print('VERIFY=', adapter.verify_authenticode(path))
+          adapter = WindowsBootstrapAdapter(Path(os.environ['RUNNER_TEMP'])/'lot19-native-status', manifest)
+          print('ADAPTER_CLASS', adapter.__class__.__module__, adapter.__class__.__name__)
+          print('ADAPTER_VERIFY', adapter.verify_authenticode(path))
           '@ | python -
+          Write-Host "PWSH_STATUS=$((Get-AuthenticodeSignature -LiteralPath "$env:WINDIR\System32\notepad.exe").Status.ToString())"
