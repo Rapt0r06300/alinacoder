@@ -5,9 +5,11 @@ from pathlib import Path
 
 from alinacoder.evaluation.torture import FailureCard, IntegratedTortureHarness, TortureLab
 from alinacoder.release.acceptance import (
+    AcceptanceCaseEvidence,
     AcceptanceEvidence,
     FinalAcceptanceGate,
     RuleTraceabilityBuilder,
+    SpecAcceptanceMatrix,
 )
 
 
@@ -70,6 +72,7 @@ class Lot18FinalGateTests(unittest.TestCase):
         self.commit = "abc123"
         self.artifact = "f" * 64
         self.required = ("core", "desktop_e2e", "torture", "final_audit")
+        self.matrix = SpecAcceptanceMatrix()
 
     def evidence(self, name: str, *, fresh: bool = True, commit: str | None = None, independent: bool = False) -> AcceptanceEvidence:
         return AcceptanceEvidence(
@@ -82,34 +85,48 @@ class Lot18FinalGateTests(unittest.TestCase):
             independent=independent,
         )
 
+    def matrix_evidence(self) -> list[AcceptanceCaseEvidence]:
+        return [AcceptanceCaseEvidence(case_id, "PASS", True, "sealed-ci") for case_id in self.matrix.required_case_ids()]
+
     def test_final_gate_rejects_stale_or_wrong_commit_proof(self) -> None:
-        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact)
+        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact, acceptance_matrix=self.matrix)
         evidences = [
             self.evidence("core"),
             self.evidence("desktop_e2e", fresh=False),
             self.evidence("torture"),
             self.evidence("final_audit", independent=True),
         ]
-        result = gate.evaluate(evidences)
+        result = gate.evaluate(evidences, self.matrix_evidence())
         self.assertFalse(result.runtime_v0_2_ready)
         self.assertIn("desktop_e2e", result.missing_or_invalid_evidence)
 
     def test_final_gate_requires_independent_final_audit(self) -> None:
-        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact)
+        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact, acceptance_matrix=self.matrix)
         evidences = [self.evidence(name) for name in self.required]
-        result = gate.evaluate(evidences)
+        result = gate.evaluate(evidences, self.matrix_evidence())
         self.assertFalse(result.runtime_v0_2_ready)
         self.assertIn("independent_final_audit", result.failures)
 
+    def test_final_gate_rejects_incomplete_spec_acceptance_matrix(self) -> None:
+        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact, acceptance_matrix=self.matrix)
+        evidences = [
+            self.evidence("core"), self.evidence("desktop_e2e"), self.evidence("torture"),
+            self.evidence("final_audit", independent=True),
+        ]
+        matrix_evidence = self.matrix_evidence()[:-1]
+        result = gate.evaluate(evidences, matrix_evidence)
+        self.assertFalse(result.runtime_v0_2_ready)
+        self.assertIn("incomplete_spec_acceptance_matrix", result.failures)
+
     def test_final_gate_can_emit_ready_only_with_complete_fresh_bound_proof(self) -> None:
-        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact)
+        gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact, acceptance_matrix=self.matrix)
         evidences = [
             self.evidence("core"),
             self.evidence("desktop_e2e"),
             self.evidence("torture"),
             self.evidence("final_audit", independent=True),
         ]
-        result = gate.evaluate(evidences)
+        result = gate.evaluate(evidences, self.matrix_evidence())
         self.assertTrue(result.runtime_v0_2_ready)
         self.assertEqual(result.missing_or_invalid_evidence, ())
         self.assertEqual(result.failures, ())
