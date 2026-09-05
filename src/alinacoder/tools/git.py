@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Sequence
 
@@ -7,9 +8,21 @@ from .models import ProcessReceipt, UnknownResultError
 from .process import ManagedProcessRunner
 
 
+def resolve_git_executable() -> str:
+    """Prefer AlinaCoder-managed MinGit without mutating the user's PATH."""
+
+    local = os.environ.get("LOCALAPPDATA")
+    if local:
+        managed = Path(local) / "Programs" / "AlinaCoder" / "Git" / "cmd" / "git.exe"
+        if managed.is_file():
+            return str(managed)
+    return "git"
+
+
 class GitMainExecutor:
-    def __init__(self, runner: ManagedProcessRunner | None = None) -> None:
+    def __init__(self, runner: ManagedProcessRunner | None = None, *, git_executable: str | None = None) -> None:
         self.runner = runner or ManagedProcessRunner()
+        self.git_executable = git_executable or resolve_git_executable()
 
     def validate_target(self, branch: str) -> None:
         if branch != "main":
@@ -21,10 +34,13 @@ class GitMainExecutor:
         raise UnknownResultError("mutation outcome unknown; reconcile state before retry")
 
     def _run(self, workspace: Path | str, argv: Sequence[str], *, timeout_seconds: float = 60) -> ProcessReceipt:
-        receipt = self.runner.run(argv, timeout_seconds=timeout_seconds, cwd=str(Path(workspace)))
+        command = list(argv)
+        if command and command[0] == "git":
+            command[0] = self.git_executable
+        receipt = self.runner.run(command, timeout_seconds=timeout_seconds, cwd=str(Path(workspace)))
         if receipt.returncode != 0 or receipt.timed_out:
             raise RuntimeError(
-                f"git command failed: {' '.join(argv)} rc={receipt.returncode} stderr={receipt.stderr.strip()}"
+                f"git command failed: {' '.join(command)} rc={receipt.returncode} stderr={receipt.stderr.strip()}"
             )
         return receipt
 
