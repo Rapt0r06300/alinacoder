@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from alinacoder.product import installer, prerequisites as p
 
@@ -41,6 +43,32 @@ class Lot19VerifiedDownloadTests(unittest.TestCase):
             path = adapter.download_verified(asset, require_authenticode=False)
             self.assertTrue(path.exists())
             self.assertEqual(path.read_bytes(), payload)
+
+    def test_clean_inventory_override_is_consumed_once_then_real_install_is_visible(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            git = root / "git.exe"
+            ollama = root / "ollama.exe"
+            git.write_bytes(b"git")
+            ollama.write_bytes(b"ollama")
+
+            def runner(args, **kwargs):
+                command = str(args[0]).lower()
+                if "git" in command:
+                    return (0, "git version 2.55.0")
+                if len(args) > 1 and args[1] == "list":
+                    return (0, "NAME ID SIZE MODIFIED\n")
+                return (0, "ollama version is 0.33.3")
+
+            with patch.dict(os.environ, {"ALINACODER_BOOTSTRAP_IGNORE_EXISTING": "git,ollama"}):
+                adapter = p.WindowsBootstrapAdapter(root, self.manifest, command_runner=runner)
+                adapter._candidate_executables = lambda name: (git if name == "git" else ollama,)  # type: ignore[method-assign]
+                first = adapter.detect_inventory()
+                second = adapter.detect_inventory()
+            self.assertIsNone(first.git)
+            self.assertIsNone(first.ollama)
+            self.assertIsNotNone(second.git)
+            self.assertIsNotNone(second.ollama)
 
 
 @unittest.skipUnless(ADAPTER_AVAILABLE and INSTALLER_BOOTSTRAP_AVAILABLE, "Installer bootstrap integration not implemented yet")
