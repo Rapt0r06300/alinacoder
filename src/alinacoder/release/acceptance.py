@@ -178,20 +178,31 @@ class AcceptanceCoverageReport:
     complete: bool
     rows: tuple[AcceptanceCoverageRow, ...]
     gaps: tuple[str, ...]
+    unknown: tuple[str, ...] = ()
+    duplicates: tuple[str, ...] = ()
+
+    @property
+    def covered_cases(self) -> int:
+        return len({row.case_id for row in self.rows if row.case_id})
 
 
 class AcceptanceCoverageCatalog:
-    def __init__(self, repo_root: Path | str) -> None:
-        self.repo_root = Path(repo_root)
+    DEFAULT_PATH = "docs/release/acceptance-coverage-v0.2.json"
 
-    def load(self) -> AcceptanceCoverageReport:
-        path = self.repo_root / "docs/release/acceptance-coverage-v0.2.json"
+    def __init__(self, repo_root: Path | str, catalog_path: Path | str = DEFAULT_PATH) -> None:
+        self.repo_root = Path(repo_root)
+        self.catalog_path = Path(catalog_path)
+
+    def validate(self, matrix: SpecAcceptanceMatrix | None = None) -> AcceptanceCoverageReport:
+        matrix = matrix or SpecAcceptanceMatrix()
+        path = self.catalog_path if self.catalog_path.is_absolute() else self.repo_root / self.catalog_path
         payload = json.loads(path.read_text(encoding="utf-8"))
-        matrix = SpecAcceptanceMatrix()
         required = set(matrix.required_case_ids())
         rows: list[AcceptanceCoverageRow] = []
         seen: set[str] = set()
         gaps: set[str] = set()
+        unknown: set[str] = set()
+        duplicates: set[str] = set()
         for entry in payload.get("cases", []):
             row = AcceptanceCoverageRow(
                 case_id=str(entry.get("case_id", "")),
@@ -199,8 +210,11 @@ class AcceptanceCoverageCatalog:
                 test_name=str(entry.get("test_name", "")),
                 evidence_key=str(entry.get("evidence_key", "")),
             )
-            if row.case_id not in required or row.case_id in seen:
-                gaps.add(row.case_id or "invalid_case")
+            if row.case_id not in required:
+                unknown.add(row.case_id or "invalid_case")
+                continue
+            if row.case_id in seen:
+                duplicates.add(row.case_id)
                 continue
             seen.add(row.case_id)
             if row.path:
@@ -215,16 +229,27 @@ class AcceptanceCoverageCatalog:
                 gaps.add(row.case_id)
             rows.append(row)
         gaps.update(required - seen)
-        return AcceptanceCoverageReport(not gaps, tuple(rows), tuple(sorted(gaps)))
+        complete = not gaps and not unknown and not duplicates
+        return AcceptanceCoverageReport(
+            complete,
+            tuple(rows),
+            tuple(sorted(gaps)),
+            tuple(sorted(unknown)),
+            tuple(sorted(duplicates)),
+        )
+
+    def load(self) -> AcceptanceCoverageReport:
+        return self.validate(SpecAcceptanceMatrix())
 
 
 class AcceptanceCatalogRunner:
-    def __init__(self, repo_root: Path | str) -> None:
+    def __init__(self, repo_root: Path | str, catalog_path: Path | str = AcceptanceCoverageCatalog.DEFAULT_PATH) -> None:
         self.repo_root = Path(repo_root)
+        self.catalog_path = Path(catalog_path)
 
     def run(self, *, external_evidence: dict[str, bool] | None = None) -> tuple[AcceptanceCaseEvidence, ...]:
         external_evidence = dict(external_evidence or {})
-        catalog = AcceptanceCoverageCatalog(self.repo_root).load()
+        catalog = AcceptanceCoverageCatalog(self.repo_root, self.catalog_path).validate(SpecAcceptanceMatrix())
         if not catalog.complete:
             return tuple(
                 AcceptanceCaseEvidence(case_id, "FAIL", True, "catalog_gap")
