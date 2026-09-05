@@ -118,6 +118,21 @@ class Lot18FinalGateTests(unittest.TestCase):
         self.assertFalse(result.runtime_v0_2_ready)
         self.assertIn("incomplete_spec_acceptance_matrix", result.failures)
 
+    def test_final_gate_fails_closed_when_acceptance_matrix_is_not_bound(self) -> None:
+        gate = FinalAcceptanceGate(
+            self.trace,
+            self.required,
+            commit_sha=self.commit,
+            artifact_sha256=self.artifact,
+        )
+        evidences = [
+            self.evidence("core"), self.evidence("desktop_e2e"), self.evidence("torture"),
+            self.evidence("final_audit", independent=True),
+        ]
+        result = gate.evaluate(evidences)
+        self.assertFalse(result.runtime_v0_2_ready)
+        self.assertIn("missing_spec_acceptance_matrix", result.failures)
+
     def test_final_gate_can_emit_ready_only_with_complete_fresh_bound_proof(self) -> None:
         gate = FinalAcceptanceGate(self.trace, self.required, commit_sha=self.commit, artifact_sha256=self.artifact, acceptance_matrix=self.matrix)
         evidences = [
