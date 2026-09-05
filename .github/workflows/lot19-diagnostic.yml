@@ -7,45 +7,16 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-installer:
+  diagnose-signature-runtime:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.12"
-      - name: Diagnose Git prerequisite pipeline
+      - name: Compare PowerShell runtimes for Authenticode
         shell: pwsh
-        env:
-          PYTHONPATH: src
         run: |
-          @'
-          from pathlib import Path
-          import os
-          import traceback
-          from alinacoder.product.prerequisites import PrerequisiteManifest, WindowsBootstrapAdapter
-
-          manifest = PrerequisiteManifest.load(Path('packaging/prerequisites-v0.2.json'))
-          state = Path(os.environ['RUNNER_TEMP']) / 'lot19-git-diagnostic'
-          adapter = WindowsBootstrapAdapter(state, manifest)
-          try:
-              asset = adapter.latest_asset('git')
-              print('ASSET', asset)
-              installer = adapter.download_verified(asset, require_authenticode=True)
-              print('DOWNLOADED', installer, installer.exists(), installer.stat().st_size)
-              print('AUTHENTICODE', adapter.verify_authenticode(installer))
-              args = [str(installer), '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-', '/CURRENTUSER']
-              print('ARGS', args)
-              code, output = adapter._run(args, timeout=1800)
-              print('INSTALL_CODE', code)
-              print('INSTALL_OUTPUT_START')
-              print(output)
-              print('INSTALL_OUTPUT_END')
-              local = Path(os.environ['LOCALAPPDATA']) / 'Programs' / 'Git' / 'cmd' / 'git.exe'
-              print('LOCAL_GIT_EXISTS', local.exists(), local)
-              if code not in (0, 3010) or not local.exists():
-                  raise SystemExit(2)
-          except Exception:
-              traceback.print_exc()
-              raise
-          '@ | python -
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe"
+          $file = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe"
+          Invoke-WebRequest -Uri $url -OutFile $file
+          Write-Host "PWSH_STATUS=$((Get-AuthenticodeSignature -LiteralPath $file).Status.ToString())"
+          & powershell.exe -NoProfile -NonInteractive -Command "`$s=(Get-AuthenticodeSignature -LiteralPath '$file'); Write-Output ('WINPS_STATUS=' + `$s.Status.ToString()); Write-Output ('WINPS_SUBJECT=' + `$s.SignerCertificate.Subject); exit 0"
+          Write-Host "WINPS_EXIT=$LASTEXITCODE"
