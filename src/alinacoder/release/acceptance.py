@@ -262,13 +262,26 @@ class FinalAcceptanceResult:
 
 
 class FinalAcceptanceGate:
-    def __init__(self, traceability: RuleTraceabilityReport, required: tuple[str, ...] | set[str], *, commit_sha: str, artifact_sha256: str) -> None:
+    def __init__(
+        self,
+        traceability: RuleTraceabilityReport,
+        required: tuple[str, ...] | set[str],
+        *,
+        commit_sha: str,
+        artifact_sha256: str,
+        acceptance_matrix: SpecAcceptanceMatrix | None = None,
+    ) -> None:
         self.traceability = traceability
         self.required = tuple(required)
         self.commit_sha = commit_sha
         self.artifact_sha256 = artifact_sha256
+        self.acceptance_matrix = acceptance_matrix
 
-    def evaluate(self, evidences: list[AcceptanceEvidence] | tuple[AcceptanceEvidence, ...]) -> FinalAcceptanceResult:
+    def evaluate(
+        self,
+        evidences: list[AcceptanceEvidence] | tuple[AcceptanceEvidence, ...],
+        acceptance_case_evidences: list[AcceptanceCaseEvidence] | tuple[AcceptanceCaseEvidence, ...] = (),
+    ) -> FinalAcceptanceResult:
         by_name = {evidence.name: evidence for evidence in evidences}
         missing: list[str] = []
         failures: list[str] = []
@@ -285,6 +298,10 @@ class FinalAcceptanceGate:
         final_audit = by_name.get("final_audit")
         if not final_audit or not final_audit.independent:
             failures.append("independent_final_audit")
+        if self.acceptance_matrix is not None:
+            matrix_report = self.acceptance_matrix.evaluate(acceptance_case_evidences)
+            if not matrix_report.passed:
+                failures.append("incomplete_spec_acceptance_matrix")
         ready = not missing and not failures
         return FinalAcceptanceResult(ready, tuple(missing), tuple(failures))
 
