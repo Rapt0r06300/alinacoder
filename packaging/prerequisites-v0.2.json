@@ -13,7 +13,7 @@
     "minimum_version": "2.40.0",
     "release_api": "https://api.github.com/repos/git-for-windows/git/releases/latest",
     "allowed_repository": "git-for-windows/git",
-    "asset_regex": "^Git-[0-9.]+-64-bit\\.exe$"
+    "asset_regex": "^MinGit-[0-9.]+-64-bit\\.zip$"
   },
   "model_profiles": [
     {
