@@ -7,22 +7,45 @@ permissions:
   contents: read
 
 jobs:
-  diagnose-signature:
+  diagnose-installer:
     runs-on: windows-latest
     steps:
-      - name: Compare Authenticode suffix handling
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+      - name: Diagnose Git prerequisite pipeline
         shell: pwsh
+        env:
+          PYTHONPATH: src
         run: |
-          $ErrorActionPreference = "Stop"
-          $url = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe"
-          $bad = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe.partial"
-          $good = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.partial.exe"
-          Invoke-WebRequest -Uri $url -OutFile $bad
-          Copy-Item $bad $good
-          $badSig = Get-AuthenticodeSignature -LiteralPath $bad
-          $goodSig = Get-AuthenticodeSignature -LiteralPath $good
-          Write-Host "BAD_SUFFIX_STATUS=$($badSig.Status)"
-          Write-Host "BAD_SUFFIX_SUBJECT=$($badSig.SignerCertificate.Subject)"
-          Write-Host "GOOD_SUFFIX_STATUS=$($goodSig.Status)"
-          Write-Host "GOOD_SUFFIX_SUBJECT=$($goodSig.SignerCertificate.Subject)"
-          if ($goodSig.Status -ne "Valid") { throw "control .exe signature is not valid" }
+          @'
+          from pathlib import Path
+          import os
+          import traceback
+          from alinacoder.product.prerequisites import PrerequisiteManifest, WindowsBootstrapAdapter
+
+          manifest = PrerequisiteManifest.load(Path('packaging/prerequisites-v0.2.json'))
+          state = Path(os.environ['RUNNER_TEMP']) / 'lot19-git-diagnostic'
+          adapter = WindowsBootstrapAdapter(state, manifest)
+          try:
+              asset = adapter.latest_asset('git')
+              print('ASSET', asset)
+              installer = adapter.download_verified(asset, require_authenticode=True)
+              print('DOWNLOADED', installer, installer.exists(), installer.stat().st_size)
+              print('AUTHENTICODE', adapter.verify_authenticode(installer))
+              args = [str(installer), '/VERYSILENT', '/NORESTART', '/NOCANCEL', '/SP-', '/CURRENTUSER']
+              print('ARGS', args)
+              code, output = adapter._run(args, timeout=1800)
+              print('INSTALL_CODE', code)
+              print('INSTALL_OUTPUT_START')
+              print(output)
+              print('INSTALL_OUTPUT_END')
+              local = Path(os.environ['LOCALAPPDATA']) / 'Programs' / 'Git' / 'cmd' / 'git.exe'
+              print('LOCAL_GIT_EXISTS', local.exists(), local)
+              if code not in (0, 3010) or not local.exists():
+                  raise SystemExit(2)
+          except Exception:
+              traceback.print_exc()
+              raise
+          '@ | python -
