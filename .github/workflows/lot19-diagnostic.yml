@@ -7,76 +7,22 @@ permissions:
   contents: read
 
 jobs:
-  diagnose:
+  diagnose-signature:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.12"
-      - name: Install pinned packager closure
+      - name: Compare Authenticode suffix handling
         shell: pwsh
-        run: >-
-          python -m pip install --disable-pip-version-check
-          pyinstaller==6.16.0
-          pyinstaller-hooks-contrib==2026.7
-          pefile==2023.2.7
-          pywin32-ctypes==0.2.3
-          altgraph==0.17.5
-          setuptools==84.0.0
-          packaging==26.3
-      - name: Build packaged setup
-        shell: pwsh
-        env:
-          PYTHONPATH: src
-        run: python scripts/build_windows.py
-      - name: Diagnose exact zero-touch bootstrap
-        shell: pwsh
-        env:
-          PYTHONPATH: src
         run: |
-          $ErrorActionPreference = "Continue"
-          $dest = Join-Path $env:RUNNER_TEMP "AlinaCoderLot19Diagnostic"
-          $systemGit = Join-Path $env:ProgramFiles "Git"
-          $hiddenGit = Join-Path $env:RUNNER_TEMP "SystemGitHiddenForLot19Diagnostic"
-          $originalPath = $env:PATH
-          $gitWasHidden = $false
-          Remove-Item -Recurse -Force $dest,$hiddenGit -ErrorAction SilentlyContinue
-          try {
-            if (Test-Path $systemGit) {
-              Move-Item -LiteralPath $systemGit -Destination $hiddenGit
-              $gitWasHidden = $true
-            }
-            $env:PATH = (($originalPath -split ';') | Where-Object { $_ -and ($_ -notmatch '(?i)\\Git(\\|$)') }) -join ';'
-            Write-Host "=== LOT19 diagnostic precondition ==="
-            Write-Host "git discoverable: $([bool](Get-Command git.exe -ErrorAction SilentlyContinue))"
-            Write-Host "ollama discoverable: $([bool](Get-Command ollama.exe -ErrorAction SilentlyContinue))"
-            & .\dist\AlinaCoderSetup.exe --install-dir $dest --model qwen3:0.6b
-            $exit = $LASTEXITCODE
-            Write-Host "=== setup exit: $exit ==="
-            foreach ($name in @("install.json","bootstrap-state.json","bootstrap-receipt.json")) {
-              $path = Join-Path $dest $name
-              if (Test-Path $path) {
-                Write-Host "=== $name ==="
-                Get-Content $path -Raw
-              } else {
-                Write-Host "=== missing $name ==="
-              }
-            }
-            $git = Join-Path $env:LOCALAPPDATA "Programs\Git\cmd\git.exe"
-            $ollama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
-            Write-Host "managed Git exists: $(Test-Path $git)"
-            Write-Host "managed Ollama exists: $(Test-Path $ollama)"
-            if (Test-Path $ollama) {
-              & $ollama --version
-              & $ollama list
-            }
-            if ($exit -ne 0) { exit $exit }
-          }
-          finally {
-            $env:PATH = $originalPath
-            if ($gitWasHidden -and (Test-Path $hiddenGit)) {
-              if (Test-Path $systemGit) { Remove-Item -Recurse -Force $systemGit }
-              Move-Item -LiteralPath $hiddenGit -Destination $systemGit
-            }
-          }
+          $ErrorActionPreference = "Stop"
+          $url = "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.5/Git-2.55.0.5-64-bit.exe"
+          $bad = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.exe.partial"
+          $good = Join-Path $env:RUNNER_TEMP "Git-2.55.0.5-64-bit.partial.exe"
+          Invoke-WebRequest -Uri $url -OutFile $bad
+          Copy-Item $bad $good
+          $badSig = Get-AuthenticodeSignature -LiteralPath $bad
+          $goodSig = Get-AuthenticodeSignature -LiteralPath $good
+          Write-Host "BAD_SUFFIX_STATUS=$($badSig.Status)"
+          Write-Host "BAD_SUFFIX_SUBJECT=$($badSig.SignerCertificate.Subject)"
+          Write-Host "GOOD_SUFFIX_STATUS=$($goodSig.Status)"
+          Write-Host "GOOD_SUFFIX_SUBJECT=$($goodSig.SignerCertificate.Subject)"
+          if ($goodSig.Status -ne "Valid") { throw "control .exe signature is not valid" }
