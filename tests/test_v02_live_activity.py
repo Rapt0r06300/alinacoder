@@ -103,6 +103,29 @@ class LiveActivityTests(unittest.TestCase):
 
         self.assertEqual(kinds, ["control_paused", "control_resumed", "control_takeover", "control_stopped"])
 
+    def test_stop_fences_late_provider_completion(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            response = ProviderResponse("Trop tard", "openrouter", "late:free", quota_remaining=2)
+            workbench = DesktopWorkbench(
+                Path(td),
+                state_path=Path(td) / "state.sqlite",
+                session_id="stop-fence",
+                inference_fabric=FakeFabric(response),
+                inference_mode="hybrid",
+            )
+            request = workbench.begin_message("Fais une tâche longue")
+            workbench.stop()
+            with self.assertRaisesRegex(RuntimeError, "stopped|not running|cancelled"):
+                workbench.complete_message(str(request["run_id"]), response)
+            current = workbench.current_run()
+            kinds = [item["kind"] for item in workbench.activity()]
+            transcript = workbench.snapshot()["transcript"]
+            workbench.close()
+
+        self.assertEqual(current["status"], "stopped")
+        self.assertNotIn("run_completed", kinds)
+        self.assertFalse(any(item.get("role") == "assistant" and item.get("text") == "Trop tard" for item in transcript))
+
 
 if __name__ == "__main__":
     unittest.main()
