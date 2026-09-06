@@ -1,11 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
-from .windows_trust import (
-    NativeWindowsBootstrapAdapter as _NativeWindowsBootstrapAdapter,
-    ObservableWindowsBootstrapAdapter as _ObservableWindowsBootstrapAdapter,
-)
+from . import windows_trust as _windows_trust
 
 
 def _official_silent_installer_args(args: list[str]) -> list[str]:
@@ -19,22 +17,23 @@ def _official_silent_installer_args(args: list[str]) -> list[str]:
     return [*args, "/SUPPRESSMSGBOXES"]
 
 
-class NativeWindowsBootstrapAdapter(_NativeWindowsBootstrapAdapter):
-    """Native bootstrap with the official non-interactive Ollama installer flags."""
+def harden_windows_bootstrap() -> None:
+    """Harden the native adapter in place while preserving its canonical identity."""
 
-    def _run(self, args: list[str], *, timeout: int = 300) -> tuple[int, str]:
-        return super()._run(_official_silent_installer_args(list(args)), timeout=timeout)
+    adapter = _windows_trust.NativeWindowsBootstrapAdapter
+    if getattr(adapter, "_alinacoder_official_silent_guard", False):
+        return
+
+    original_run = adapter._run
+
+    def hardened_run(self: Any, args: list[str], *, timeout: int = 300) -> tuple[int, str]:
+        return original_run(self, _official_silent_installer_args(list(args)), timeout=timeout)
+
+    hardened_run.__name__ = original_run.__name__
+    hardened_run.__qualname__ = f"{adapter.__name__}._run"
+    hardened_run.__module__ = adapter.__module__
+    adapter._run = hardened_run  # type: ignore[method-assign]
+    adapter._alinacoder_official_silent_guard = True  # type: ignore[attr-defined]
 
 
-class ObservableWindowsBootstrapAdapter(_ObservableWindowsBootstrapAdapter):
-    """Observable bootstrap with the same fully-silent Ollama process boundary."""
-
-    def _run(self, args: list[str], *, timeout: int = 300) -> tuple[int, str]:
-        return super()._run(_official_silent_installer_args(list(args)), timeout=timeout)
-
-
-__all__ = [
-    "NativeWindowsBootstrapAdapter",
-    "ObservableWindowsBootstrapAdapter",
-    "_official_silent_installer_args",
-]
+__all__ = ["harden_windows_bootstrap", "_official_silent_installer_args"]
