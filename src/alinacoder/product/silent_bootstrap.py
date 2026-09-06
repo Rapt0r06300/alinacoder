@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any
 
 from . import windows_trust as _windows_trust
-from .prerequisites import ProvenanceError
+from .prerequisites import (
+    BootstrapError,
+    ProvenanceError,
+    WindowsBootstrapAdapter as _PowerShellWindowsBootstrapAdapter,
+    version_at_least,
+)
 
 
 def _official_silent_installer_args(args: list[str]) -> list[str]:
@@ -88,6 +93,41 @@ def _bind_verified_prefetch_cache(adapter: type[Any]) -> None:
     adapter._alinacoder_prefetch_cache_guard = True  # type: ignore[attr-defined]
 
 
+def _bind_targeted_ollama_post_install_check(adapter: type[Any]) -> None:
+    """Verify the installed Ollama binary without repeatedly running `ollama list`."""
+
+    if getattr(adapter, "_alinacoder_targeted_ollama_post_install_guard", False):
+        return
+
+    original_install = adapter.install_component
+
+    def hardened_install_component(self: Any, component: str, *, operation: str):
+        if component != "ollama":
+            return original_install(self, component, operation=operation)
+
+        # The base installer already performs provenance/authenticode checks and launches
+        # the official silent installer. NativeWindowsBootstrapAdapter historically then
+        # called detect_inventory() in a retry loop; that also executes `ollama list`,
+        # which can block while the service is still starting. Post-install readiness only
+        # needs the binary plus its version; model enumeration happens later in bootstrap.
+        receipt = _PowerShellWindowsBootstrapAdapter.install_component(self, component, operation=operation)
+        policy = self._policy(component)
+        for attempt in range(180):
+            executable = self._find_executable("ollama")
+            if executable is not None:
+                installed_version = self._component_version("ollama", executable)
+                if version_at_least(installed_version, policy.minimum_version):
+                    return receipt
+            self._sleep(min(0.5 + (attempt * 0.05), 2.0))
+        raise BootstrapError(f"{component} {operation} launcher exited but verified installation was not observed")
+
+    hardened_install_component.__name__ = original_install.__name__
+    hardened_install_component.__qualname__ = f"{adapter.__name__}.install_component"
+    hardened_install_component.__module__ = adapter.__module__
+    adapter.install_component = hardened_install_component  # type: ignore[method-assign]
+    adapter._alinacoder_targeted_ollama_post_install_guard = True  # type: ignore[attr-defined]
+
+
 def harden_windows_bootstrap() -> None:
     """Harden Windows adapters in place while preserving their canonical identities."""
 
@@ -104,6 +144,7 @@ def harden_windows_bootstrap() -> None:
         adapter._run = hardened_run  # type: ignore[method-assign]
         adapter._alinacoder_official_silent_guard = True  # type: ignore[attr-defined]
 
+    _bind_targeted_ollama_post_install_check(adapter)
     _bind_verified_prefetch_cache(adapter)
     _bind_verified_prefetch_cache(_windows_trust.ObservableWindowsBootstrapAdapter)
 
