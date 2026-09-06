@@ -101,7 +101,7 @@ class Lot19InstallerLifecycleIntegrationTests(unittest.TestCase):
     def test_cli_failure_before_bootstrap_still_writes_resumable_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             dest = Path(td) / "dest"
-            with patch.object(installer, "build_bootstrapper", side_effect=FileNotFoundError("bundled prerequisite manifest not found")):
+            with patch.object(installer, "build_bootstrapper", side_effect=RuntimeError("unexpected packaged setup boundary failure")):
                 code = installer.main([
                     "--quiet",
                     "--offline",
@@ -114,7 +114,7 @@ class Lot19InstallerLifecycleIntegrationTests(unittest.TestCase):
             metadata = json.loads((dest / "install.json").read_text(encoding="utf-8"))
             self.assertFalse(metadata["bootstrap_ready"])
             self.assertEqual(metadata["last_operation"], "install")
-            self.assertTrue(metadata["bootstrap_blockers"])
+            self.assertEqual(metadata["bootstrap_blockers"], ["setup_error:RuntimeError"])
 
     def test_deferred_install_copies_app_but_records_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as td:
