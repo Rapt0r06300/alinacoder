@@ -231,6 +231,14 @@ jobs:
             }
           }
 
+      - name: Verify v0.2 provider fabric E2E
+        shell: pwsh
+        env:
+          PYTHONPATH: src
+        run: |
+          python scripts/verify_v02_provider_fabric.py --artifact .\dist\AlinaCoder.exe --commit $env:GITHUB_SHA --model qwen3:0.6b --out .\dist\provider-fabric-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "provider fabric E2E failed" }
+
       - name: Verify release bundle provenance
         shell: pwsh
         env:
@@ -267,6 +275,7 @@ jobs:
           semantic_ui = json.loads((dist / 'semantic-ui-evidence.json').read_text(encoding='utf-8-sig'))
           bootstrap = json.loads((dist / 'lot19-bootstrap-evidence.json').read_text(encoding='utf-8-sig'))
           lot19_matrix = json.loads((dist / 'lot19-scenario-matrix.json').read_text(encoding='utf-8-sig'))
+          provider_fabric = json.loads((dist / 'provider-fabric-evidence.json').read_text(encoding='utf-8-sig'))
           bootstrap_e2e = bool(
               bootstrap.get('ok')
               and bootstrap.get('bootstrap_e2e')
@@ -278,6 +287,15 @@ jobs:
               and lot19_matrix.get('artifact_sha256') == digest
               and len(lot19_matrix.get('scenarios', {})) == 6
               and all(item.get('ok') for item in lot19_matrix.get('scenarios', {}).values())
+          )
+          provider_fabric_e2e = bool(
+              provider_fabric.get('ok')
+              and provider_fabric.get('provider_fabric_e2e')
+              and provider_fabric.get('real_inference')
+              and provider_fabric.get('commit_sha') == commit
+              and provider_fabric.get('artifact_sha256') == digest
+              and provider_fabric.get('provider_id') == 'ollama_local'
+              and provider_fabric.get('response_nonempty')
           )
           provenance_ok = all(
               (dist / name).exists() and (dist / name).stat().st_size > 2
@@ -303,11 +321,12 @@ jobs:
               AcceptanceEvidence('torture', 'PASS' if torture.readiness.ready else 'FAIL', commit, digest, True, source='integrated-torture'),
               AcceptanceEvidence('provenance', 'PASS' if provenance_ok else 'FAIL', commit, digest, True, source='github-attestation'),
               AcceptanceEvidence('bootstrap_e2e', 'PASS' if bootstrap_e2e else 'FAIL', commit, digest, True, source='lot19-clean-windows'),
-              AcceptanceEvidence('final_audit', 'PASS' if trace.complete and matrix_report.passed and bootstrap_e2e else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
+              AcceptanceEvidence('provider_fabric_e2e', 'PASS' if provider_fabric_e2e else 'FAIL', commit, digest, True, source='zero-cost-provider-fabric'),
+              AcceptanceEvidence('final_audit', 'PASS' if trace.complete and matrix_report.passed and bootstrap_e2e and provider_fabric_e2e else 'FAIL', commit, digest, True, source='sealed-ci', independent=True),
           ]
           result = FinalAcceptanceGate(
               trace,
-              ('core','desktop_e2e','torture','provenance','bootstrap_e2e','final_audit'),
+              ('core','desktop_e2e','torture','provenance','bootstrap_e2e','provider_fabric_e2e','final_audit'),
               commit_sha=commit,
               artifact_sha256=digest,
               acceptance_matrix=matrix,
@@ -333,6 +352,7 @@ jobs:
               'torture_score': torture.readiness.score,
               'desktop_e2e': bool(desktop.get('ok')),
               'bootstrap_e2e': bootstrap_e2e,
+              'provider_fabric_e2e': provider_fabric_e2e,
               'lot19_scenarios_passed': sum(1 for item in lot19_matrix.get('scenarios', {}).values() if item.get('ok')),
               'lot19_scenarios_required': 6,
               'provenance_verified': provenance_ok,
@@ -363,6 +383,7 @@ jobs:
             dist/windows-clean-install-evidence.json
             dist/lot19-bootstrap-evidence.json
             dist/lot19-scenario-matrix.json
+            dist/provider-fabric-evidence.json
             dist/provenance-verification.json
             dist/setup-provenance-verification.json
             dist/sbom-attestation-verification.json
