@@ -328,6 +328,38 @@ def _run_bootstrap_only(install_dir: Path, *, online: bool, model: str | None) -
     return report
 
 
+def _requested_operation(args: argparse.Namespace) -> str:
+    if args.repair:
+        return "repair"
+    if args.upgrade:
+        return "upgrade"
+    if args.bootstrap_only:
+        return "bootstrap"
+    if args.rollback:
+        return "rollback"
+    if args.uninstall:
+        return "uninstall"
+    return "upgrade" if (args.install_dir / "AlinaCoder.exe").exists() else "install"
+
+
+def _write_failure_receipt_if_missing(args: argparse.Namespace, exc: BaseException) -> None:
+    """Leave a resumable fail-closed receipt even when setup fails before bootstrap."""
+
+    if args.uninstall or args.rollback:
+        return
+    install_dir = Path(args.install_dir)
+    if (install_dir / "install.json").exists():
+        return
+    blocker = f"setup_error:{type(exc).__name__}"
+    report = BootstrapReport(False, str(args.model or ""), (), (blocker,))
+    try:
+        _write_metadata(install_dir, operation=_requested_operation(args), report=report)
+    except OSError:
+        # Receipt persistence must not hide the original setup failure or turn it
+        # into a false success. The caller still returns the fail-closed exit code.
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="AlinaCoderSetup")
     parser.add_argument("--install-dir", type=Path, default=default_install_dir())
@@ -411,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"Installed AlinaCoder to {target}")
         return 0
     except (BootstrapError, FileNotFoundError, OSError) as exc:
+        _write_failure_receipt_if_missing(args, exc)
         if not args.quiet:
             print(f"AlinaCoder setup failed: {exc}", file=sys.stderr)
         return 2
