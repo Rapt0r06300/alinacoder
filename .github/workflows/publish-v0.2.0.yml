@@ -1,0 +1,175 @@
+name: publish-v0.2.0
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: windows-latest
+    steps:
+      - name: Download exact verified CI artifact
+        id: gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $mainSha = (gh api repos/Rapt0r06300/alinacoder/commits/main --jq .sha).Trim()
+          if ($mainSha -ne $env:SOURCE_SHA) {
+            Write-Host "Skipping stale successful CI $env:SOURCE_SHA; main is $mainSha"
+            "publish=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            exit 0
+          }
+          $artifactName = "AlinaCoder-v0.2-rc-$env:SOURCE_SHA"
+          Remove-Item -Recurse -Force .\release -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path .\release | Out-Null
+          gh run download $env:SOURCE_RUN_ID --repo Rapt0r06300/alinacoder --name $artifactName --dir .\release
+          if ($LASTEXITCODE -ne 0) { throw "Could not download exact CI artifact $artifactName" }
+          "publish=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Validate same-SHA release evidence
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $required = @(
+            "AlinaCoder.exe",
+            "AlinaCoderSetup.exe",
+            "release-manifest.json",
+            "sbom.spdx.json",
+            "prerequisites-v0.2.json",
+            "provider-fabric-evidence.json",
+            "final-acceptance-evidence.json"
+          )
+          foreach ($name in $required) {
+            if (-not (Test-Path (Join-Path .\release $name))) { throw "Missing release artifact: $name" }
+          }
+          $final = Get-Content .\release\final-acceptance-evidence.json -Raw | ConvertFrom-Json
+          $fabric = Get-Content .\release\provider-fabric-evidence.json -Raw | ConvertFrom-Json
+          $exeSha = (Get-FileHash .\release\AlinaCoder.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (-not $final.runtime_v0_2_ready) { throw "RUNTIME_V0_2_READY is false" }
+          if (-not $final.bootstrap_e2e) { throw "bootstrap_e2e is false" }
+          if (-not $final.provider_fabric_e2e) { throw "provider_fabric_e2e is false" }
+          if (-not $final.acceptance_matrix_passed) { throw "acceptance matrix is false" }
+          if ($final.lot19_scenarios_passed -ne $final.lot19_scenarios_required) { throw "LOT19 scenario matrix incomplete" }
+          if ($final.commit_sha -ne $env:SOURCE_SHA) { throw "final evidence commit mismatch" }
+          if ($final.artifact_sha256 -ne $exeSha) { throw "final evidence artifact mismatch" }
+          if (-not $fabric.ok -or -not $fabric.real_inference -or -not $fabric.provider_fabric_e2e) { throw "provider fabric evidence is not proven" }
+          if ($fabric.commit_sha -ne $env:SOURCE_SHA -or $fabric.artifact_sha256 -ne $exeSha) { throw "provider fabric evidence is not same-SHA/same-artifact" }
+          if ($fabric.provider_id -ne "ollama_local") { throw "provider fabric did not prove local failover" }
+
+      - name: Build complete v0.2.0 archive
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zip = ".\AlinaCoder-v0.2.0.zip"
+          Remove-Item -Force $zip -ErrorAction SilentlyContinue
+          Compress-Archive -Path .\release\* -DestinationPath $zip -CompressionLevel Optimal -Force
+          if (-not (Test-Path $zip)) { throw "release archive was not created" }
+
+      - name: Move v0.2.0 tag and update release metadata
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $final = Get-Content .\release\final-acceptance-evidence.json -Raw | ConvertFrom-Json
+          $exeSha = (Get-FileHash .\release\AlinaCoder.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $zipSha = (Get-FileHash .\AlinaCoder-v0.2.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $notes = @"
+          # AlinaCoder v0.2.0
+
+          Release Windows v0.2 mise à jour depuis le SHA validé : ``$env:SOURCE_SHA``.
+
+          ## Runtime d'inférence
+          - Provider fabric zéro-coût réel : PASS
+          - Bascule modèle/provider sur quota : couverte par les tests du même SHA
+          - Fallback local Ollama : PASS avec inférence réelle
+          - Coffre de clés fournisseurs Windows DPAPI : intégré à AlinaCoder.exe
+          - Configuration des fournisseurs : directement dans l'interface Providers
+
+          ## Validation
+          - RUNTIME_V0_2_READY : true
+          - Clean-Windows bootstrap E2E : PASS
+          - Provider fabric E2E : PASS
+          - LOT 19 : $($final.lot19_scenarios_passed)/$($final.lot19_scenarios_required) scénarios PASS
+          - Acceptation globale : $($final.acceptance_cases_passed)/$($final.acceptance_cases_required)
+          - Provenance/SBOM : vérifiées
+
+          **SHA-256 AlinaCoder.exe**
+          ``$exeSha``
+
+          **SHA-256 archive complète**
+          ``$zipSha``
+          "@
+          $notes | Set-Content .\release-notes-v0.2.0.md -Encoding utf8
+
+          gh api --method PATCH repos/Rapt0r06300/alinacoder/git/refs/tags/v0.2.0 -f sha="$env:SOURCE_SHA" -F force=true | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Could not move v0.2.0 tag to exact verified SHA" }
+          gh release edit v0.2.0 --repo Rapt0r06300/alinacoder --title "AlinaCoder v0.2.0" --target "$env:SOURCE_SHA" --notes-file .\release-notes-v0.2.0.md
+          if ($LASTEXITCODE -ne 0) { throw "Could not update v0.2.0 release metadata" }
+
+      - name: Replace v0.2.0 assets
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          gh release upload v0.2.0 --repo Rapt0r06300/alinacoder --clobber `
+            .\AlinaCoder-v0.2.0.zip `
+            .\release\AlinaCoder.exe `
+            .\release\AlinaCoderSetup.exe `
+            .\release\prerequisites-v0.2.json `
+            .\release\release-manifest.json `
+            .\release\sbom.spdx.json `
+            .\release\provider-fabric-evidence.json `
+            .\release\final-acceptance-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "Release asset replacement failed" }
+
+      - name: Verify published tag and asset digests
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = gh api repos/Rapt0r06300/alinacoder/git/ref/tags/v0.2.0 | ConvertFrom-Json
+          if ($tag.object.sha -ne $env:SOURCE_SHA) { throw "published tag does not match verified SHA" }
+          $published = gh api repos/Rapt0r06300/alinacoder/releases/tags/v0.2.0 | ConvertFrom-Json
+          if ($published.target_commitish -ne $env:SOURCE_SHA) { throw "release target_commitish does not match verified SHA" }
+          $paths = @{
+            "AlinaCoder-v0.2.0.zip" = ".\AlinaCoder-v0.2.0.zip"
+            "AlinaCoder.exe" = ".\release\AlinaCoder.exe"
+            "AlinaCoderSetup.exe" = ".\release\AlinaCoderSetup.exe"
+            "prerequisites-v0.2.json" = ".\release\prerequisites-v0.2.json"
+            "release-manifest.json" = ".\release\release-manifest.json"
+            "sbom.spdx.json" = ".\release\sbom.spdx.json"
+            "provider-fabric-evidence.json" = ".\release\provider-fabric-evidence.json"
+            "final-acceptance-evidence.json" = ".\release\final-acceptance-evidence.json"
+          }
+          foreach ($name in $paths.Keys) {
+            $asset = @($published.assets | Where-Object { $_.name -eq $name })
+            if ($asset.Count -ne 1) { throw "expected exactly one published asset named $name" }
+            $expected = "sha256:" + (Get-FileHash $paths[$name] -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($asset[0].digest -ne $expected) { throw "published digest mismatch for $name" }
+          }
+          Write-Host "v0.2.0 publication verified at $env:SOURCE_SHA"
