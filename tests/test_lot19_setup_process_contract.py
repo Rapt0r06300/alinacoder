@@ -9,6 +9,15 @@ class Lot19SetupProcessBoundaryTests(unittest.TestCase):
     def _workflow(self, name: str) -> str:
         return (Path(__file__).parents[1] / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
+    @staticmethod
+    def _waited_setup_invocations(workflow: str, binary: str) -> list[str]:
+        pattern = re.compile(r"^\s*\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*Start-Process\b")
+        return [
+            line
+            for line in workflow.splitlines()
+            if pattern.search(line) and binary in line
+        ]
+
     def test_windowed_setup_is_always_waited_in_lot19(self) -> None:
         workflow = self._workflow("ci.yml")
         self.assertNotRegex(
@@ -16,11 +25,7 @@ class Lot19SetupProcessBoundaryTests(unittest.TestCase):
             re.compile(r"(?m)^\s*&\s+\.\\dist\\AlinaCoderSetup\.exe\b"),
             "windowed AlinaCoderSetup.exe must never be invoked as a synchronous console command",
         )
-        waited = [
-            line
-            for line in workflow.splitlines()
-            if "Start-Process" in line and "AlinaCoderSetup.exe" in line
-        ]
+        waited = self._waited_setup_invocations(workflow, "AlinaCoderSetup.exe")
         self.assertGreaterEqual(len(waited), 9, "every LOT19 setup lifecycle invocation must wait for the GUI process")
         for line in waited:
             self.assertIn("-Wait", line)
@@ -40,10 +45,8 @@ class Lot19SetupProcessBoundaryTests(unittest.TestCase):
         )
         waited = [
             line
-            for line in workflow.splitlines()
-            if "Start-Process" in line
-            and "AlinaCoderSetup.exe" in line
-            and "--installer-ui-smoke" in line
+            for line in self._waited_setup_invocations(workflow, "AlinaCoderSetup.exe")
+            if "--installer-ui-smoke" in line
         ]
         self.assertEqual(len(waited), 1)
         self.assertIn("-Wait", waited[0])
