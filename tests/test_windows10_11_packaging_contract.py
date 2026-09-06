@@ -38,6 +38,17 @@ class Windows10And11PackagingContractTests(unittest.TestCase):
         self.assertIn('"app_manifest_embedded": app_manifest_embedded', generator)
         self.assertIn('"setup_manifest_embedded": setup_manifest_embedded', generator)
 
+    def test_release_verifier_fails_closed_on_windows_contract(self) -> None:
+        verifier = (ROOT / "scripts" / "verify_release.py").read_text(encoding="utf-8")
+        self.assertIn('windows = manifest.get("windows_compatibility", {})', verifier)
+        self.assertIn('windows.get("minimum_windows_major") == 10', verifier)
+        self.assertIn('windows.get("supported_os_guid") == WIN10_11_GUID', verifier)
+        self.assertIn('windows.get("windows_10") is True', verifier)
+        self.assertIn('windows.get("windows_11") is True', verifier)
+        self.assertIn('windows.get("app_manifest_embedded") is True', verifier)
+        self.assertIn('windows.get("setup_manifest_embedded") is True', verifier)
+        self.assertIn("and windows_ok", verifier)
+
     def test_publisher_fails_closed_unless_windows_10_11_evidence_is_true(self) -> None:
         publish = (ROOT / ".github" / "workflows" / "publish-v0.2.0.yml").read_text(encoding="utf-8")
         self.assertIn("$windows = $releaseManifest.windows_compatibility", publish)
