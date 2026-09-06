@@ -10,28 +10,40 @@ class Lot19SetupProcessBoundaryTests(unittest.TestCase):
         return (Path(__file__).parents[1] / ".github" / "workflows" / name).read_text(encoding="utf-8")
 
     @staticmethod
-    def _waited_setup_invocations(workflow: str, binary: str) -> list[str]:
+    def _start_process_invocations(workflow: str, binary: str) -> list[str]:
         pattern = re.compile(r"^\s*\$[A-Za-z_][A-Za-z0-9_]*\s*=\s*Start-Process\b")
-        return [
-            line
-            for line in workflow.splitlines()
-            if pattern.search(line) and binary in line
-        ]
+        return [line for line in workflow.splitlines() if pattern.search(line) and binary in line]
 
-    def test_windowed_setup_is_always_waited_in_lot19(self) -> None:
+    def test_lot19_waits_for_setup_process_only_not_persistent_children(self) -> None:
         workflow = self._workflow("ci.yml")
         self.assertNotRegex(
             workflow,
             re.compile(r"(?m)^\s*&\s+\.\\dist\\AlinaCoderSetup\.exe\b"),
-            "windowed AlinaCoderSetup.exe must never be invoked as a synchronous console command",
+            "windowed AlinaCoderSetup.exe must never be invoked through the console call operator",
         )
-        waited = self._waited_setup_invocations(workflow, "AlinaCoderSetup.exe")
-        self.assertGreaterEqual(len(waited), 9, "every LOT19 setup lifecycle invocation must wait for the GUI process")
-        for line in waited:
-            self.assertIn("-Wait", line)
-            self.assertIn("-PassThru", line)
+        self.assertIn("function Invoke-Lot19Setup", workflow)
+        invocations = self._start_process_invocations(workflow, "AlinaCoderSetup.exe")
+        self.assertEqual(len(invocations), 1, "LOT19 must centralize setup launch in one bounded helper")
+        self.assertIn("-PassThru", invocations[0])
+        self.assertNotIn("-Wait", invocations[0], "Start-Process -Wait waits persistent Ollama descendants")
+        self.assertIn("$process.WaitForExit($TimeoutSeconds * 1000)", workflow)
+        self.assertGreaterEqual(workflow.count("Invoke-Lot19Setup -Label"), 9)
 
-    def test_setup_exit_codes_are_read_from_waited_process_objects(self) -> None:
+    def test_lot19_timeout_emits_process_and_receipt_diagnostics(self) -> None:
+        workflow = self._workflow("ci.yml")
+        self.assertIn("Get-CimInstance Win32_Process", workflow)
+        self.assertIn('"install.json"', workflow)
+        self.assertIn('"bootstrap-state.json"', workflow)
+        self.assertIn('"bootstrap-receipt.json"', workflow)
+        self.assertRegex(
+            workflow,
+            re.compile(
+                r"LOT 19 clean Windows bootstrap E2E and lifecycle matrix\s*\n\s*timeout-minutes:\s*30",
+                re.MULTILINE,
+            ),
+        )
+
+    def test_setup_exit_codes_are_read_from_process_objects(self) -> None:
         workflow = self._workflow("ci.yml")
         self.assertIn("$offlineExit = $offlineSetup.ExitCode", workflow)
         self.assertNotIn("$offlineExit = $LASTEXITCODE", workflow)
@@ -45,7 +57,7 @@ class Lot19SetupProcessBoundaryTests(unittest.TestCase):
         )
         waited = [
             line
-            for line in self._waited_setup_invocations(workflow, "AlinaCoderSetup.exe")
+            for line in self._start_process_invocations(workflow, "AlinaCoderSetup.exe")
             if "--installer-ui-smoke" in line
         ]
         self.assertEqual(len(waited), 1)
