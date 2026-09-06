@@ -50,7 +50,6 @@ class SetupController:
         self.install_dir = Path(install_dir)
         self.log_path = Path(log_path) if log_path is not None else default_setup_log_path()
         self._logger = SetupLogger(self.log_path)
-        self._external_sink = event_sink
         self._sink = combine_event_sinks(self._logger, event_sink, self._capture_event)
         self._token = cancellation_token or CancellationToken()
         self._operation = operation or self._default_operation
@@ -74,7 +73,8 @@ class SetupController:
             detail=event.detail or self._snapshot.detail,
         )
 
-    def _emit(self, event: SetupEvent) -> None:
+    def notify(self, event: SetupEvent) -> None:
+        """Publish one setup event to both durable log and graphical observers."""
         self._sink(event)
 
     def _default_operation(
@@ -83,7 +83,6 @@ class SetupController:
         event_sink: SetupEventSink,
         cancellation_token: CancellationToken,
     ) -> tuple[Path, str]:
-        # Imported lazily to avoid a module cycle with installer entry points.
         from . import installer
         from .windows_trust import ObservableWindowsBootstrapAdapter
         from .prerequisites import PrerequisiteBootstrapper, PrerequisiteManifest
@@ -133,22 +132,22 @@ class SetupController:
             message="Préparation de l'installation",
             log_path=str(self.log_path),
         )
-        self._emit(SetupEvent("preparation", "start", "Préparation de l'installation", str(self.install_dir)))
+        self.notify(SetupEvent("preparation", "start", "Préparation de l'installation", str(self.install_dir)))
         try:
             target, selected_model = self._operation(model, self._sink, self._token)
             self._token.raise_if_cancelled()
             self._snapshot = replace(
                 self._snapshot,
                 state="success",
-                phase="complete",
-                message="AlinaCoder est installé et prêt",
+                phase="alinacoder",
+                message="AlinaCoder est installé",
                 selected_model=selected_model,
                 installed_path=str(target),
                 last_error="",
                 can_retry=False,
                 can_launch=Path(target).is_file(),
             )
-            self._emit(SetupEvent("complete", "complete", "Installation terminée", str(target)))
+            self.notify(SetupEvent("alinacoder", "complete", "AlinaCoder installé", str(target)))
         except SetupCancelled as exc:
             self._snapshot = replace(
                 self._snapshot,
@@ -159,7 +158,7 @@ class SetupController:
                 can_retry=True,
                 can_launch=False,
             )
-            self._emit(SetupEvent("cancel", "cancelled", "Installation annulée", str(exc)))
+            self.notify(SetupEvent("cancel", "cancelled", "Installation annulée", str(exc)))
         except Exception as exc:
             detail = f"{type(exc).__name__}: {exc}"
             self._snapshot = replace(
@@ -171,7 +170,7 @@ class SetupController:
                 can_retry=True,
                 can_launch=False,
             )
-            self._emit(SetupEvent("error", "error", "L'installation a rencontré une erreur", detail))
+            self.notify(SetupEvent("error", "error", "L'installation a rencontré une erreur", detail))
         return self._snapshot
 
     def retry(self) -> SetupSnapshot:
@@ -182,7 +181,7 @@ class SetupController:
 
     def cancel(self) -> None:
         self._token.cancel()
-        self._emit(SetupEvent(self._snapshot.phase, "info", "Annulation demandée"))
+        self.notify(SetupEvent(self._snapshot.phase, "info", "Annulation demandée"))
 
     def launch_installed(self) -> bool:
         if not self._snapshot.can_launch or not self._snapshot.installed_path:
