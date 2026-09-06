@@ -46,6 +46,16 @@ class LiveActivityUiContractTests(unittest.TestCase):
         self.assertNotIn("status.set", worker)
         self.assertNotIn("set_view", worker)
 
+    def test_idle_polling_does_not_refresh_git_diff_or_full_inspectors_every_100ms(self) -> None:
+        source = Path(inspect.getsourcefile(product_capabilities)).read_text(encoding="utf-8")
+        poll_start = source.index("def poll_agent_ui")
+        poll_end = source.index("def send_message", poll_start)
+        poll = source[poll_start:poll_end]
+        empty_handler = poll[poll.index("except queue.Empty:"):]
+        self.assertNotIn("refresh_views()", empty_handler)
+        self.assertNotIn("workbench.git.diff", empty_handler)
+        self.assertNotIn("workbench.status()", empty_handler)
+
 
 if __name__ == "__main__":
     unittest.main()
