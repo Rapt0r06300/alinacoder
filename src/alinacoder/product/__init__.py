@@ -18,8 +18,12 @@ def _apply_ci_bootstrap_timeouts() -> None:
 _apply_ci_bootstrap_timeouts()
 
 from . import prerequisites as _prerequisites
-from .windows_trust import NativeWindowsBootstrapAdapter, ObservableWindowsBootstrapAdapter
+from . import windows_trust as _windows_trust
+from .silent_bootstrap import NativeWindowsBootstrapAdapter, ObservableWindowsBootstrapAdapter
 
+# Bind both historical import paths to the same hardened production adapters.
 _prerequisites.WindowsBootstrapAdapter = NativeWindowsBootstrapAdapter
+_windows_trust.NativeWindowsBootstrapAdapter = NativeWindowsBootstrapAdapter
+_windows_trust.ObservableWindowsBootstrapAdapter = ObservableWindowsBootstrapAdapter
 
 __all__ = ["NativeWindowsBootstrapAdapter", "ObservableWindowsBootstrapAdapter"]
