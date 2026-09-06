@@ -27,6 +27,11 @@ class InferenceFabric:
         self._router = FrontierRouter()
         self._depleted: set[tuple[str, str]] = set()
 
+    def provider_ids(self) -> tuple[str, ...]:
+        """Return instantiated providers in deterministic runtime order."""
+
+        return tuple(provider.definition.provider_id for provider in self._providers)
+
     def _is_local(self, provider: ZeroCostProvider) -> bool:
         return provider.definition.provider_id == "ollama_local" or provider.definition.protocol == "ollama"
 
