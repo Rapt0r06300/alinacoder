@@ -4,6 +4,10 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write
@@ -39,6 +43,7 @@ jobs:
     if: github.event_name == 'push'
     needs: core
     runs-on: windows-latest
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -95,10 +100,61 @@ jobs:
           $semantic = Start-Process -FilePath ".\dist\AlinaCoder.exe" -ArgumentList "--semantic-ui" -Wait -PassThru
           if ($semantic.ExitCode -ne 0) { throw "packaged semantic UI oracle failed with exit code $($semantic.ExitCode)" }
 
+      - name: Resolve official Ollama asset
+        id: ollama_asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $release = gh api repos/ollama/ollama/releases/latest | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "official Ollama release lookup failed" }
+          if ([string]$release.html_url -notlike "https://github.com/ollama/ollama/releases/*") { throw "Ollama release escaped allow-listed repository" }
+          $assets = @($release.assets | Where-Object { $_.name -eq "OllamaSetup.exe" })
+          if ($assets.Count -ne 1) { throw "expected exactly one official OllamaSetup.exe asset" }
+          $digest = [string]$assets[0].digest
+          if ($digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { throw "official Ollama installer is missing SHA-256 digest" }
+          "tag=$($release.tag_name)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "digest=$($digest.Substring(7).ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Restore official Ollama installer cache
+        id: ollama_cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/AlinaCoderPrereqCache/OllamaSetup.exe
+          key: ollama-setup-${{ runner.os }}-${{ steps.ollama_asset.outputs.digest }}
+
+      - name: Prefetch official Ollama installer
+        if: steps.ollama_cache.outputs.cache-hit != 'true'
+        timeout-minutes: 12
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $cache = Join-Path $env:RUNNER_TEMP "AlinaCoderPrereqCache"
+          New-Item -ItemType Directory -Force -Path $cache | Out-Null
+          gh release download "${{ steps.ollama_asset.outputs.tag }}" -R ollama/ollama -p "OllamaSetup.exe" -D $cache --clobber
+          if ($LASTEXITCODE -ne 0) { throw "official Ollama installer prefetch failed" }
+
+      - name: Verify prefetched official Ollama installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Join-Path $env:RUNNER_TEMP "AlinaCoderPrereqCache\OllamaSetup.exe"
+          if (-not (Test-Path $installer)) { throw "prefetched Ollama installer is missing" }
+          $expected = "${{ steps.ollama_asset.outputs.digest }}".ToLowerInvariant()
+          $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "prefetched Ollama installer digest mismatch" }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          if ($signature.Status -ne "Valid") { throw "prefetched Ollama installer Authenticode verification failed: $($signature.Status)" }
+
       - name: LOT 19 clean Windows bootstrap E2E and lifecycle matrix
+        timeout-minutes: 20
         shell: pwsh
         env:
           PYTHONPATH: src
+          ALINACODER_PREREQ_CACHE_DIR: ${{ runner.temp }}/AlinaCoderPrereqCache
         run: |
           $ErrorActionPreference = "Stop"
           $dest = Join-Path $env:RUNNER_TEMP "AlinaCoderLot19Clean"
