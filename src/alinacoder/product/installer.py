@@ -442,7 +442,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.quiet:
                 print(f"Installed AlinaCoder to {target}")
         return 0
-    except (BootstrapError, FileNotFoundError, OSError) as exc:
+    except Exception as exc:
         _write_failure_receipt_if_missing(args, exc)
         if not args.quiet:
             print(f"AlinaCoder setup failed: {exc}", file=sys.stderr)
