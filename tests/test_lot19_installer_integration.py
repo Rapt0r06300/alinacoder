@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from alinacoder.product import installer, prerequisites as p
 
@@ -42,6 +45,39 @@ class Lot19VerifiedDownloadTests(unittest.TestCase):
             self.assertTrue(path.exists())
             self.assertEqual(path.read_bytes(), payload)
 
+    def test_mingit_zip_is_extracted_to_managed_user_location(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            archive = root / "MinGit-2.55.0-64-bit.zip"
+            with zipfile.ZipFile(archive, "w") as bundle:
+                bundle.writestr("cmd/git.exe", b"fake-git")
+            local_app_data = root / "LocalAppData"
+            commands: list[list[str]] = []
+
+            def runner(args, **kwargs):
+                commands.append(list(args))
+                return 0, "git version 2.55.0.windows.1"
+
+            adapter = p.WindowsBootstrapAdapter(root / "state", self.manifest, command_runner=runner)
+            asset = p.ReleaseAsset(
+                "git",
+                "git-for-windows/git",
+                "2.55.0",
+                archive.name,
+                "https://github.com/git-for-windows/git/releases/download/v2.55.0.windows.1/" + archive.name,
+                hashlib.sha256(archive.read_bytes()).hexdigest(),
+            )
+            adapter.latest_asset = lambda component: asset
+            adapter.download_verified = lambda selected, require_authenticode=True: archive
+
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(local_app_data)}, clear=False):
+                receipt = adapter.install_component("git", operation="install")
+                expected = local_app_data / "Programs" / "AlinaCoder" / "Git" / "cmd" / "git.exe"
+                self.assertTrue(expected.exists())
+                self.assertEqual(Path(receipt.path), expected)
+                self.assertEqual(adapter._find_executable("git"), expected)
+            self.assertFalse(any(command and command[0].lower().endswith(".zip") for command in commands))
+
 
 @unittest.skipUnless(ADAPTER_AVAILABLE and INSTALLER_BOOTSTRAP_AVAILABLE, "Installer bootstrap integration not implemented yet")
 class Lot19InstallerLifecycleIntegrationTests(unittest.TestCase):
@@ -61,6 +97,24 @@ class Lot19InstallerLifecycleIntegrationTests(unittest.TestCase):
             metadata = json.loads((root / "dest" / "install.json").read_text(encoding="utf-8"))
             self.assertFalse(metadata["bootstrap_ready"])
             self.assertEqual(metadata["bootstrap_blockers"], ["network"])
+
+    def test_cli_failure_before_bootstrap_still_writes_resumable_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            dest = Path(td) / "dest"
+            with patch.object(installer, "build_bootstrapper", side_effect=FileNotFoundError("bundled prerequisite manifest not found")):
+                code = installer.main([
+                    "--quiet",
+                    "--offline",
+                    "--install-dir",
+                    str(dest),
+                    "--model",
+                    "qwen3:0.6b",
+                ])
+            self.assertEqual(code, 2)
+            metadata = json.loads((dest / "install.json").read_text(encoding="utf-8"))
+            self.assertFalse(metadata["bootstrap_ready"])
+            self.assertEqual(metadata["last_operation"], "install")
+            self.assertTrue(metadata["bootstrap_blockers"])
 
     def test_deferred_install_copies_app_but_records_not_ready(self) -> None:
         with tempfile.TemporaryDirectory() as td:
