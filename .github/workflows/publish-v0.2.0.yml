@@ -72,6 +72,37 @@ jobs:
           if ($fabric.commit_sha -ne $env:SOURCE_SHA -or $fabric.artifact_sha256 -ne $exeSha) { throw "provider fabric evidence is not same-SHA/same-artifact" }
           if ($fabric.provider_id -ne "ollama_local") { throw "provider fabric did not prove local failover" }
 
+      - name: Verify real double-click setup window
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $proc = Start-Process -FilePath .\release\AlinaCoderSetup.exe -PassThru
+          Start-Sleep -Seconds 5
+          $proc.Refresh()
+          if ($proc.HasExited) {
+            throw "Default double-click setup exited prematurely with code $($proc.ExitCode); graphical setup must stay open for the user"
+          }
+          Stop-Process -Id $proc.Id -Force
+          $proc.WaitForExit()
+
+      - name: Verify visible installer UI evidence
+        if: steps.gate.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          & .\release\AlinaCoderSetup.exe --installer-ui-smoke --commit $env:SOURCE_SHA --evidence-out .\release\visible-installer-evidence.json
+          if ($LASTEXITCODE -ne 0) { throw "visible installer UI smoke failed with exit code $LASTEXITCODE" }
+          $visible = Get-Content .\release\visible-installer-evidence.json -Raw | ConvertFrom-Json
+          $setupSha = (Get-FileHash .\release\AlinaCoderSetup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (-not $visible.ok -or -not $visible.visible_installer_e2e) { throw "visible_installer_e2e is false" }
+          if (-not $visible.no_console_default -or -not $visible.error_persistent -or -not $visible.retry_available) { throw "visible installer recovery contract is incomplete" }
+          if ($visible.commit_sha -ne $env:SOURCE_SHA) { throw "visible installer evidence commit mismatch" }
+          if ($visible.setup_sha256 -ne $setupSha) { throw "visible installer evidence setup_sha256 mismatch" }
+          if ($visible.phase_count -ne 9) { throw "visible installer phase contract incomplete" }
+
       - name: Build complete v0.2.0 archive
         if: steps.gate.outputs.publish == 'true'
         shell: pwsh
@@ -92,11 +123,20 @@ jobs:
           $ErrorActionPreference = "Stop"
           $final = Get-Content .\release\final-acceptance-evidence.json -Raw | ConvertFrom-Json
           $exeSha = (Get-FileHash .\release\AlinaCoder.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupSha = (Get-FileHash .\release\AlinaCoderSetup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           $zipSha = (Get-FileHash .\AlinaCoder-v0.2.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()
           $notes = @"
           # AlinaCoder v0.2.0
 
           Release Windows v0.2 mise à jour depuis le SHA validé : ``$env:SOURCE_SHA``.
+
+          ## Installation Windows
+          - **AlinaCoderSetup.exe est maintenant un vrai setup graphique** : PASS
+          - Aucun terminal/fenêtre noire au double-clic : PASS
+          - Progression et étapes visibles : PASS
+          - Erreurs persistantes + Réessayer + diagnostic + logs : PASS
+          - Lancement final AlinaCoder : intégré
+          - Raccourcis Bureau/Menu Démarrer + désinstallation Windows : intégrés
 
           ## Runtime d'inférence
           - Provider fabric zéro-coût réel : PASS
@@ -109,12 +149,16 @@ jobs:
           - RUNTIME_V0_2_READY : true
           - Clean-Windows bootstrap E2E : PASS
           - Provider fabric E2E : PASS
+          - Visible installer E2E : PASS
           - LOT 19 : $($final.lot19_scenarios_passed)/$($final.lot19_scenarios_required) scénarios PASS
           - Acceptation globale : $($final.acceptance_cases_passed)/$($final.acceptance_cases_required)
           - Provenance/SBOM : vérifiées
 
           **SHA-256 AlinaCoder.exe**
           ``$exeSha``
+
+          **SHA-256 AlinaCoderSetup.exe**
+          ``$setupSha``
 
           **SHA-256 archive complète**
           ``$zipSha``
@@ -141,6 +185,7 @@ jobs:
             .\release\release-manifest.json `
             .\release\sbom.spdx.json `
             .\release\provider-fabric-evidence.json `
+            .\release\visible-installer-evidence.json `
             .\release\final-acceptance-evidence.json
           if ($LASTEXITCODE -ne 0) { throw "Release asset replacement failed" }
 
@@ -164,6 +209,7 @@ jobs:
             "release-manifest.json" = ".\release\release-manifest.json"
             "sbom.spdx.json" = ".\release\sbom.spdx.json"
             "provider-fabric-evidence.json" = ".\release\provider-fabric-evidence.json"
+            "visible-installer-evidence.json" = ".\release\visible-installer-evidence.json"
             "final-acceptance-evidence.json" = ".\release\final-acceptance-evidence.json"
           }
           foreach ($name in $paths.Keys) {
@@ -172,4 +218,4 @@ jobs:
             $expected = "sha256:" + (Get-FileHash $paths[$name] -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($asset[0].digest -ne $expected) { throw "published digest mismatch for $name" }
           }
-          Write-Host "v0.2.0 publication verified at $env:SOURCE_SHA"
+          Write-Host "v0.2.0 publication verified with visible installer at $env:SOURCE_SHA"
