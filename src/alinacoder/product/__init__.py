@@ -6,8 +6,7 @@ same fail-closed trust behavior while graphical setup can observe progress.
 """
 
 from . import prerequisites as _prerequisites
-from .windows_trust import NativeWindowsBootstrapAdapter
-from .observable_bootstrap import ObservableWindowsBootstrapAdapter
+from .windows_trust import NativeWindowsBootstrapAdapter, ObservableWindowsBootstrapAdapter
 
 _prerequisites.WindowsBootstrapAdapter = ObservableWindowsBootstrapAdapter
 
