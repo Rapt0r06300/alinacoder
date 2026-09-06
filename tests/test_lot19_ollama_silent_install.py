@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from alinacoder.product.prerequisites import (
     ComponentInventory,
+    InstalledComponent,
     PrerequisiteManifest,
     ReleaseAsset,
     WindowsBootstrapAdapter,
@@ -33,13 +34,26 @@ class Lot19OllamaSilentInstallTests(unittest.TestCase):
             url="https://github.com/ollama/ollama/releases/download/v0.33.3/OllamaSetup.exe",
             sha256="a" * 64,
         )
+        installed = InstalledComponent(
+            name="ollama",
+            version="0.33.3",
+            origin="managed_by_alinacoder",
+            path="C:/Users/test/AppData/Local/Programs/Ollama/ollama.exe",
+        )
 
         with tempfile.TemporaryDirectory() as td:
             adapter = WindowsBootstrapAdapter(Path(td), self.manifest, command_runner=runner)
             with (
                 patch.object(adapter, "latest_asset", return_value=asset),
                 patch.object(adapter, "download_verified", return_value=Path(td) / "OllamaSetup.exe"),
-                patch.object(adapter, "detect_inventory", return_value=ComponentInventory(None, None)),
+                patch.object(
+                    adapter,
+                    "detect_inventory",
+                    side_effect=[
+                        ComponentInventory(None, None),
+                        ComponentInventory(None, installed),
+                    ],
+                ),
             ):
                 adapter.install_component("ollama", operation="install")
 
