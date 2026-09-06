@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import tempfile
 from typing import Any, Sequence
 
+from alinacoder.desktop.activity import ActivityEvent, sanitize_activity_details
 from alinacoder.goal.engine import GoalEngine
 from alinacoder.goal.models import GoalContract
 from alinacoder.intelligence_mesh import CapabilityRequirement
@@ -46,11 +48,31 @@ class DesktopWorkbench:
                     "active_goal_id": None,
                     "receipts": [],
                     "control_state": "RUNNING",
+                    "activity": [],
+                    "next_activity_id": 1,
+                    "next_run_id": 1,
+                    "current_run": None,
                 },
             )
         self.goals = GoalEngine(self.store, session_id)
         self.git = GitMainExecutor()
         self.runner = ManagedProcessRunner()
+
+    @staticmethod
+    def _utc_now() -> str:
+        return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    @staticmethod
+    def _ensure_state_shape(data: dict[str, Any]) -> None:
+        data.setdefault("project", {})
+        data.setdefault("transcript", [])
+        data.setdefault("active_goal_id", None)
+        data.setdefault("receipts", [])
+        data.setdefault("control_state", "RUNNING")
+        data.setdefault("activity", [])
+        data.setdefault("next_activity_id", 1)
+        data.setdefault("next_run_id", 1)
+        data.setdefault("current_run", None)
 
     def close(self) -> None:
         self.store.close()
@@ -64,6 +86,7 @@ class DesktopWorkbench:
     def _mutate(self, event_kind: str, mutate, metadata: dict[str, Any] | None = None) -> dict[str, Any]:
         state = self.store.get_state(self.session_id)
         data = deepcopy(state.data)
+        self._ensure_state_shape(data)
         mutate(data)
         epoch = self.store.acquire_writer(self.session_id)
         committed = self.store.commit_state(
@@ -72,21 +95,65 @@ class DesktopWorkbench:
             epoch,
             data,
             event_kind,
-            metadata or {},
+            sanitize_activity_details(metadata or {}),
         )
         return committed.data
 
     def _receipt(self, action: str, ok: bool, details: dict[str, Any]) -> dict[str, Any]:
-        receipt = {"action": action, "ok": bool(ok), "details": deepcopy(details)}
+        receipt = {"action": action, "ok": bool(ok), "details": sanitize_activity_details(details)}
         self._mutate(
             "desktop_receipt",
             lambda data: data.setdefault("receipts", []).append(receipt),
             {"action": action, "ok": bool(ok)},
         )
-        return receipt
+        return deepcopy(receipt)
 
     def snapshot(self) -> dict[str, Any]:
-        return deepcopy(self.store.get_state(self.session_id).data)
+        data = deepcopy(self.store.get_state(self.session_id).data)
+        self._ensure_state_shape(data)
+        return data
+
+    def emit_activity(
+        self,
+        kind: str,
+        summary: str,
+        *,
+        status: str = "info",
+        run_id: str | None = None,
+        phase: str | None = None,
+        details: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        holder: dict[str, Any] = {}
+
+        def mutate(data: dict[str, Any]) -> None:
+            sequence = int(data.setdefault("next_activity_id", 1))
+            event = ActivityEvent(
+                event_id=f"activity:{sequence}",
+                timestamp=self._utc_now(),
+                kind=str(kind),
+                summary=str(summary),
+                status=str(status),
+                run_id=str(run_id) if run_id is not None else None,
+                phase=str(phase) if phase is not None else None,
+                details=sanitize_activity_details(details or {}),
+            ).to_dict()
+            data["next_activity_id"] = sequence + 1
+            data.setdefault("activity", []).append(event)
+            holder.update(event)
+
+        self._mutate(
+            "desktop_activity",
+            mutate,
+            {"kind": str(kind), "status": str(status), "run_id": run_id},
+        )
+        return deepcopy(holder)
+
+    def activity(self) -> list[dict[str, Any]]:
+        return deepcopy(list(self.snapshot().get("activity", [])))
+
+    def current_run(self) -> dict[str, Any] | None:
+        current = self.snapshot().get("current_run")
+        return deepcopy(current) if isinstance(current, dict) else None
 
     def open_project(self) -> dict[str, Any]:
         if not (self.workspace / ".git").exists():
@@ -100,6 +167,12 @@ class DesktopWorkbench:
         }
         self._mutate("desktop_project_opened", lambda data: data.__setitem__("project", project), project)
         self._receipt("open_project", True, project)
+        self.emit_activity(
+            "project_opened",
+            f"Opened project on {branch}",
+            status="success",
+            details={"path": project["path"], "branch": branch, "head": project["head"]},
+        )
         return project
 
     @staticmethod
@@ -112,40 +185,180 @@ class DesktopWorkbench:
                 messages.append({"role": role, "content": text})
         return messages
 
-    def send_message(self, text: str) -> dict[str, Any]:
-        message = {"role": "user", "text": text}
+    def _append_user_message(self, text: str) -> None:
+        message = {"role": "user", "text": str(text)}
         self._mutate(
             "desktop_message",
             lambda data: data.setdefault("transcript", []).append(message),
             {"role": "user"},
         )
-        if self.inference_fabric is None:
-            return self._receipt("send_message", True, {"text": text})
 
-        transcript = self.snapshot().get("transcript", [])
-        messages = self._canonical_messages(list(transcript))
-        requirement = CapabilityRequirement({"reasoning": 0.3, "code": 0.3})
-        response = self.inference_fabric.complete(messages, requirement, mode=self.inference_mode)
+    def _allocate_run(self, text: str) -> dict[str, Any]:
+        holder: dict[str, Any] = {}
+
+        def mutate(data: dict[str, Any]) -> None:
+            sequence = int(data.setdefault("next_run_id", 1))
+            run_id = f"run:{sequence}"
+            data["next_run_id"] = sequence + 1
+            run = {
+                "run_id": run_id,
+                "status": "running",
+                "phase": "inference",
+                "provider_id": None,
+                "model_id": None,
+                "error": None,
+                "started_at": self._utc_now(),
+                "finished_at": None,
+                "request_preview": str(text)[:240],
+            }
+            data["current_run"] = run
+            holder.update(run)
+
+        self._mutate("desktop_run_started", mutate, {"status": "running", "phase": "inference"})
+        self.emit_activity(
+            "run_started",
+            "Started agent run",
+            status="running",
+            run_id=str(holder["run_id"]),
+            phase="inference",
+            details={"request_preview": holder["request_preview"]},
+        )
+        return deepcopy(holder)
+
+    def begin_message(self, text: str) -> dict[str, Any]:
+        if self.inference_fabric is None:
+            raise RuntimeError("inference fabric is not configured")
+        self._append_user_message(text)
+        run = self._allocate_run(text)
+        messages = self._canonical_messages(list(self.snapshot().get("transcript", [])))
+        request = {
+            "run_id": run["run_id"],
+            "messages": messages,
+            "requirement": CapabilityRequirement({"reasoning": 0.3, "code": 0.3}),
+            "mode": self.inference_mode,
+        }
+        self.emit_activity(
+            "inference_started",
+            "Selecting model and generating response",
+            status="running",
+            run_id=str(run["run_id"]),
+            phase="inference",
+            details={"mode": self.inference_mode, "message_count": len(messages)},
+        )
+        return request
+
+    def perform_inference(self, request: dict[str, Any]) -> Any:
+        """Perform only provider inference. Safe for a GUI worker thread: no StateStore/Tk access."""
+        if self.inference_fabric is None:
+            raise RuntimeError("inference fabric is not configured")
+        return self.inference_fabric.complete(
+            request["messages"],
+            request["requirement"],
+            mode=request["mode"],
+        )
+
+    def complete_message(self, run_id: str, response: Any) -> dict[str, Any]:
+        provider_id = str(response.provider_id)
+        model_id = str(response.model_id)
+        assistant_text = str(response.text)
         assistant = {
             "role": "assistant",
-            "text": str(response.text),
-            "provider_id": str(response.provider_id),
-            "model_id": str(response.model_id),
+            "text": assistant_text,
+            "provider_id": provider_id,
+            "model_id": model_id,
         }
         self._mutate(
             "desktop_assistant_message",
             lambda data: data.setdefault("transcript", []).append(assistant),
-            {"role": "assistant", "provider_id": response.provider_id, "model_id": response.model_id},
+            {"role": "assistant", "provider_id": provider_id, "model_id": model_id},
+        )
+        self.emit_activity(
+            "inference_completed",
+            "Model response received",
+            status="success",
+            run_id=run_id,
+            phase="inference",
+            details={"provider_id": provider_id, "model_id": model_id},
+        )
+
+        finished_at = self._utc_now()
+
+        def mutate_run(data: dict[str, Any]) -> None:
+            current = data.get("current_run")
+            if not isinstance(current, dict) or current.get("run_id") != run_id:
+                raise RuntimeError(f"run is not current: {run_id}")
+            current.update(
+                {
+                    "status": "completed",
+                    "phase": "complete",
+                    "provider_id": provider_id,
+                    "model_id": model_id,
+                    "error": None,
+                    "finished_at": finished_at,
+                }
+            )
+
+        self._mutate(
+            "desktop_run_completed",
+            mutate_run,
+            {"run_id": run_id, "provider_id": provider_id, "model_id": model_id},
+        )
+        self.emit_activity(
+            "run_completed",
+            "Agent run completed",
+            status="success",
+            run_id=run_id,
+            phase="complete",
+            details={"provider_id": provider_id, "model_id": model_id},
         )
         details = {
-            "text": text,
-            "assistant_text": str(response.text),
-            "provider_id": str(response.provider_id),
-            "model_id": str(response.model_id),
+            "assistant_text": assistant_text,
+            "provider_id": provider_id,
+            "model_id": model_id,
             "quota_remaining": response.quota_remaining,
-            "metadata": deepcopy(response.metadata),
+            "metadata": sanitize_activity_details(response.metadata),
+            "run_id": run_id,
         }
         return self._receipt("send_message", True, details)
+
+    def fail_message(self, run_id: str, error: BaseException | str) -> None:
+        public_error = str(error)[:1000]
+        finished_at = self._utc_now()
+
+        def mutate_run(data: dict[str, Any]) -> None:
+            current = data.get("current_run")
+            if not isinstance(current, dict) or current.get("run_id") != run_id:
+                raise RuntimeError(f"run is not current: {run_id}")
+            current.update(
+                {
+                    "status": "failed",
+                    "phase": "failed",
+                    "error": public_error,
+                    "finished_at": finished_at,
+                }
+            )
+
+        self._mutate("desktop_run_failed", mutate_run, {"run_id": run_id, "error": public_error})
+        self.emit_activity(
+            "run_failed",
+            "Agent run failed",
+            status="error",
+            run_id=run_id,
+            phase="failed",
+            details={"error": public_error},
+        )
+
+    def send_message(self, text: str) -> dict[str, Any]:
+        if self.inference_fabric is None:
+            self._append_user_message(text)
+            return self._receipt("send_message", True, {"text": text})
+        request = self.begin_message(text)
+        try:
+            response = self.perform_inference(request)
+        except Exception as exc:
+            self.fail_message(str(request["run_id"]), exc)
+            raise
+        return self.complete_message(str(request["run_id"]), response)
 
     def start_goal(self, objective: str, criteria: list[str]) -> GoalContract:
         goal = self.goals.create_goal(objective, criteria)
@@ -155,6 +368,12 @@ class DesktopWorkbench:
             {"goal_id": goal.goal_id},
         )
         self._receipt("start_goal", True, {"goal_id": goal.goal_id, "objective": objective})
+        self.emit_activity(
+            "goal_started",
+            "Goal created and persisted",
+            status="success",
+            details={"goal_id": goal.goal_id, "objective": objective},
+        )
         return goal
 
     def _safe_path(self, relative_path: str) -> Path:
@@ -183,14 +402,35 @@ class DesktopWorkbench:
             self.git.mark_intent_to_add(self.workspace, relative_path)
             self.store.ack_effect(effect_key, {"written": True, "path": relative_path})
         details = {"path": relative_path, "effect_key": effect_key, "admitted": admitted}
-        return self._receipt("write_text", True, details)
+        receipt = self._receipt("write_text", True, details)
+        self.emit_activity(
+            "file_written",
+            f"Updated {relative_path}",
+            status="success",
+            details={"path": relative_path, "admitted": admitted},
+        )
+        return receipt
 
     def diff(self) -> str:
         value = self.git.diff(self.workspace)
         self._receipt("view_diff", True, {"bytes": len(value.encode())})
+        self.emit_activity(
+            "diff_inspected",
+            "Refreshed Git diff",
+            status="success",
+            details={"bytes": len(value.encode())},
+        )
         return value
 
     def run_tests(self, argv: Sequence[str]) -> dict[str, Any]:
+        command = list(argv)
+        self.emit_activity(
+            "tests_started",
+            "Started verification command",
+            status="running",
+            phase="verification",
+            details={"argv": command},
+        )
         process = self.runner.run(argv, timeout_seconds=120, cwd=str(self.workspace))
         details = {
             "argv": list(process.argv),
@@ -199,7 +439,16 @@ class DesktopWorkbench:
             "stdout": process.stdout[-4000:],
             "stderr": process.stderr[-4000:],
         }
-        return self._receipt("run_tests", process.returncode == 0 and not process.timed_out, details)
+        ok = process.returncode == 0 and not process.timed_out
+        receipt = self._receipt("run_tests", ok, details)
+        self.emit_activity(
+            "tests_completed",
+            "Verification command passed" if ok else "Verification command failed",
+            status="success" if ok else "error",
+            phase="verification",
+            details={"argv": command, "returncode": process.returncode, "timed_out": process.timed_out},
+        )
+        return receipt
 
     def verify_goal_criterion(self, goal_id: str, criterion_id: str, evidence: dict[str, Any]) -> GoalContract:
         goal = self.goals.verify_criterion(goal_id, criterion_id, evidence)
@@ -208,16 +457,44 @@ class DesktopWorkbench:
             True,
             {"goal_id": goal_id, "criterion_id": criterion_id},
         )
+        self.emit_activity(
+            "goal_criterion_verified",
+            "Goal criterion verified",
+            status="success",
+            phase="verification",
+            details={"goal_id": goal_id, "criterion_id": criterion_id},
+        )
         return goal
 
     def complete_goal(self, goal_id: str) -> GoalContract:
         goal = self.goals.complete(goal_id)
         self._receipt("complete_goal", True, {"goal_id": goal_id})
+        self.emit_activity(
+            "goal_completed",
+            "Goal completed",
+            status="success",
+            details={"goal_id": goal_id},
+        )
         return goal
 
     def commit_main(self, message: str) -> dict[str, Any]:
+        self.emit_activity(
+            "git_commit_started",
+            "Committing verified changes on main",
+            status="running",
+            phase="git",
+            details={"message": message},
+        )
         result = self.git.commit_all(self.workspace, message)
-        self._receipt("commit_main", bool(result.get("ok")), result)
+        ok = bool(result.get("ok"))
+        self._receipt("commit_main", ok, result)
+        self.emit_activity(
+            "git_commit_completed",
+            "Git commit completed" if ok else "Git commit failed",
+            status="success" if ok else "error",
+            phase="git",
+            details={"branch": result.get("branch"), "head": result.get("head"), "ok": ok},
+        )
         return dict(result)
 
     def status(self) -> dict[str, Any]:
@@ -235,6 +512,18 @@ class DesktopWorkbench:
             {"state": state},
         )
         self._receipt(state.lower(), True, {"state": state})
+        kind_by_state = {
+            "PAUSED": "control_paused",
+            "RUNNING": "control_resumed",
+            "STOPPED": "control_stopped",
+            "USER_TAKEOVER": "control_takeover",
+        }
+        self.emit_activity(
+            kind_by_state[state],
+            f"Control state changed to {state}",
+            status="stopped" if state == "STOPPED" else "info",
+            details={"state": state},
+        )
         return data
 
     def pause(self) -> None:
