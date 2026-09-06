@@ -51,6 +51,11 @@
     {"case_id":"desktop_ux.plan_artifact_selection","path":"src/alinacoder/desktop/core.py","evidence_key":"desktop.semantic_ui"},
     {"case_id":"desktop_ux.targeted_edit_continue","path":"tests/test_goal_engine.py","test_name":"test_pause_resume_edit_cancel_and_minimal_invalidation"},
     {"case_id":"desktop_ux.verification_visibility","path":"src/alinacoder/desktop/core.py","evidence_key":"desktop.semantic_ui"},
-    {"case_id":"desktop_ux.low_idle_resource_use","path":"tests/test_lot11_13_acceptance_hardening.py","test_name":"test_versioned_performance_budget_rejects_runtime_regression"}
+    {"case_id":"desktop_ux.low_idle_resource_use","path":"tests/test_lot11_13_acceptance_hardening.py","test_name":"test_versioned_performance_budget_rejects_runtime_regression"},
+    {"case_id":"desktop_ux.live_activity_persistence","path":"tests/test_v02_live_activity.py","test_name":"test_activity_is_persisted_with_monotonic_ids_and_safe_details"},
+    {"case_id":"desktop_ux.safe_activity_redaction","path":"tests/test_v02_live_activity.py","test_name":"test_activity_is_persisted_with_monotonic_ids_and_safe_details"},
+    {"case_id":"desktop_ux.observable_run_lifecycle","path":"tests/test_v02_live_activity.py","test_name":"test_successful_inference_emits_required_run_lifecycle_and_provenance"},
+    {"case_id":"desktop_ux.responsive_message_execution","path":"tests/test_v02_live_activity_ui_contract.py","test_name":"test_gui_uses_inference_only_background_worker_and_tk_polling"},
+    {"case_id":"desktop_ux.activity_first_progressive_disclosure","path":"tests/test_v02_live_activity_ui_contract.py","test_name":"test_activity_is_first_secondary_inspector"}
   ]
 }
