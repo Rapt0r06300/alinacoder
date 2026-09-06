@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from alinacoder.product import prerequisites as p
+from alinacoder.product.windows_trust import ObservableWindowsBootstrapAdapter
 
 
 class VisibleInstallerEventTests(unittest.TestCase):
@@ -37,7 +38,7 @@ class VisibleInstallerEventTests(unittest.TestCase):
             hashlib.sha256(payload).hexdigest(),
         )
         with tempfile.TemporaryDirectory() as td:
-            adapter = p.WindowsBootstrapAdapter(
+            adapter = ObservableWindowsBootstrapAdapter(
                 Path(td),
                 manifest,
                 download_bytes=lambda _url: payload,
