@@ -45,7 +45,11 @@ class Lot19ModelPullResilienceTests(unittest.TestCase):
                 raise outcome
             return outcome
 
-        with tempfile.TemporaryDirectory() as td:
+        with tempfile.TemporaryDirectory() as td, patch.dict(
+            "os.environ",
+            {"ALINACODER_MODEL_PULL_TIMEOUT_SECONDS": ""},
+            clear=False,
+        ):
             adapter = self._adapter(td, runner, sleeps)
             self.assertTrue(adapter.pull_model("http://127.0.0.1:11434", "qwen3:0.6b"))
 
