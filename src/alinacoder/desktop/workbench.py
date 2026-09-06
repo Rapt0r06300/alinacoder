@@ -9,6 +9,7 @@ from typing import Any, Sequence
 
 from alinacoder.goal.engine import GoalEngine
 from alinacoder.goal.models import GoalContract
+from alinacoder.intelligence_mesh import CapabilityRequirement
 from alinacoder.state.store import SessionNotFoundError, StateStore
 from alinacoder.tools.git import GitMainExecutor
 from alinacoder.tools.process import ManagedProcessRunner
@@ -17,10 +18,23 @@ from alinacoder.tools.process import ManagedProcessRunner
 class DesktopWorkbench:
     """Canonical desktop control surface shared by GUI, headless UI tests and packaged E2E."""
 
-    def __init__(self, workspace: Path | str, *, state_path: Path | str, session_id: str = "desktop") -> None:
+    def __init__(
+        self,
+        workspace: Path | str,
+        *,
+        state_path: Path | str,
+        session_id: str = "desktop",
+        inference_fabric: Any | None = None,
+        inference_mode: str = "local-only",
+    ) -> None:
         self.workspace = Path(workspace).resolve()
         self.store = StateStore(state_path)
         self.session_id = session_id
+        mode = str(inference_mode).strip().lower()
+        if mode not in {"local-only", "free-cloud", "hybrid"}:
+            raise ValueError("inference_mode must be local-only, free-cloud, or hybrid")
+        self.inference_fabric = inference_fabric
+        self.inference_mode = mode
         try:
             self.store.get_state(session_id)
         except SessionNotFoundError:
@@ -88,6 +102,16 @@ class DesktopWorkbench:
         self._receipt("open_project", True, project)
         return project
 
+    @staticmethod
+    def _canonical_messages(transcript: list[dict[str, Any]]) -> list[dict[str, str]]:
+        messages: list[dict[str, str]] = []
+        for item in transcript:
+            role = str(item.get("role", ""))
+            text = str(item.get("text", ""))
+            if role in {"user", "assistant"} and text:
+                messages.append({"role": role, "content": text})
+        return messages
+
     def send_message(self, text: str) -> dict[str, Any]:
         message = {"role": "user", "text": text}
         self._mutate(
@@ -95,7 +119,33 @@ class DesktopWorkbench:
             lambda data: data.setdefault("transcript", []).append(message),
             {"role": "user"},
         )
-        return self._receipt("send_message", True, {"text": text})
+        if self.inference_fabric is None:
+            return self._receipt("send_message", True, {"text": text})
+
+        transcript = self.snapshot().get("transcript", [])
+        messages = self._canonical_messages(list(transcript))
+        requirement = CapabilityRequirement({"reasoning": 0.3, "code": 0.3})
+        response = self.inference_fabric.complete(messages, requirement, mode=self.inference_mode)
+        assistant = {
+            "role": "assistant",
+            "text": str(response.text),
+            "provider_id": str(response.provider_id),
+            "model_id": str(response.model_id),
+        }
+        self._mutate(
+            "desktop_assistant_message",
+            lambda data: data.setdefault("transcript", []).append(assistant),
+            {"role": "assistant", "provider_id": response.provider_id, "model_id": response.model_id},
+        )
+        details = {
+            "text": text,
+            "assistant_text": str(response.text),
+            "provider_id": str(response.provider_id),
+            "model_id": str(response.model_id),
+            "quota_remaining": response.quota_remaining,
+            "metadata": deepcopy(response.metadata),
+        }
+        return self._receipt("send_message", True, details)
 
     def start_goal(self, objective: str, criteria: list[str]) -> GoalContract:
         goal = self.goals.create_goal(objective, criteria)
