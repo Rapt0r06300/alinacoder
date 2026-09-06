@@ -6,6 +6,7 @@ from pathlib import Path
 
 from alinacoder.intelligence_mesh.credentials import ProviderCredentialVault
 from alinacoder.intelligence_mesh.provider_atlas import normative_provider_atlas
+from alinacoder.intelligence_mesh.runtime import build_default_inference_fabric
 
 from .core import DesktopControlPlane, DesktopStateStore, WorkbenchModel, self_test
 from .experience import FirstRunOnboarding, VoiceInputAdapter
@@ -232,12 +233,24 @@ def run_gui() -> int:
         try:
             if workbench is not None:
                 workbench.close()
-            workbench = DesktopWorkbench(selected, state_path=_default_runtime_state_path(), session_id="desktop")
+            mode = onboarding.provider_mode or "local-only"
+            inference_fabric = build_default_inference_fabric(credential_vault, mode=mode)
+            workbench = DesktopWorkbench(
+                selected,
+                state_path=_default_runtime_state_path(),
+                session_id="desktop",
+                inference_fabric=inference_fabric,
+                inference_mode=mode,
+            )
             project = workbench.open_project()
             onboarding.configure_project(project["path"])
             project_text.set(project["path"])
+            inference_text.set(f"{mode}/{onboarding.local_runtime or '-'}")
             status.set(workbench.snapshot().get("control_state", "RUNNING"))
-            transcript.insert("end", f"\n[system] Opened {project['path']} on {project['branch']}\n")
+            transcript.insert(
+                "end",
+                f"\n[system] Opened {project['path']} on {project['branch']} — providers: {', '.join(inference_fabric.provider_ids()) or 'none'}\n",
+            )
             persist()
             refresh_views()
         except Exception as exc:
@@ -289,8 +302,14 @@ def run_gui() -> int:
         if not text:
             return
         try:
-            workbench.send_message(text)
+            receipt = workbench.send_message(text)
             transcript.insert("end", f"\nYou: {text}\n")
+            details = receipt.get("details", {})
+            assistant_text = str(details.get("assistant_text", "")).strip()
+            if assistant_text:
+                provider_id = str(details.get("provider_id", ""))
+                model_id = str(details.get("model_id", ""))
+                transcript.insert("end", f"AlinaCoder [{provider_id}/{model_id}]: {assistant_text}\n")
             if text.startswith("/goal "):
                 objective = text[6:].strip()
                 goal = workbench.start_goal(
