@@ -60,7 +60,10 @@ jobs:
           }
           $final = Get-Content .\release\final-acceptance-evidence.json -Raw | ConvertFrom-Json
           $fabric = Get-Content .\release\provider-fabric-evidence.json -Raw | ConvertFrom-Json
+          $releaseManifest = Get-Content .\release\release-manifest.json -Raw | ConvertFrom-Json
+          $windows = $releaseManifest.windows_compatibility
           $exeSha = (Get-FileHash .\release\AlinaCoder.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $setupSha = (Get-FileHash .\release\AlinaCoderSetup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if (-not $final.runtime_v0_2_ready) { throw "RUNTIME_V0_2_READY is false" }
           if (-not $final.bootstrap_e2e) { throw "bootstrap_e2e is false" }
           if (-not $final.provider_fabric_e2e) { throw "provider_fabric_e2e is false" }
@@ -71,6 +74,11 @@ jobs:
           if (-not $fabric.ok -or -not $fabric.real_inference -or -not $fabric.provider_fabric_e2e) { throw "provider fabric evidence is not proven" }
           if ($fabric.commit_sha -ne $env:SOURCE_SHA -or $fabric.artifact_sha256 -ne $exeSha) { throw "provider fabric evidence is not same-SHA/same-artifact" }
           if ($fabric.provider_id -ne "ollama_local") { throw "provider fabric did not prove local failover" }
+          if ($windows.minimum_windows_major -ne 10) { throw "release does not target Windows major version 10" }
+          if ($windows.supported_os_guid -ne "{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}") { throw "Windows 10/11 supportedOS GUID mismatch" }
+          if (-not $windows.windows_10 -or -not $windows.windows_11) { throw "Windows 10/11 compatibility is not both proven" }
+          if (-not $windows.app_manifest_embedded -or -not $windows.setup_manifest_embedded) { throw "Windows compatibility manifest is not embedded in both executables" }
+          if ($windows.setup_sha256 -ne $setupSha) { throw "Windows compatibility evidence is not bound to the exact setup artifact" }
 
       - name: Verify real double-click setup window
         if: steps.gate.outputs.publish == 'true'
@@ -132,6 +140,8 @@ jobs:
 
           ## Installation Windows
           - **AlinaCoderSetup.exe est maintenant un vrai setup graphique** : PASS
+          - Windows 10 (x64, famille NT 10.0) : compatibilité déclarée et vérifiée dans le PE
+          - Windows 11 (x64, famille NT 10.0) : compatibilité déclarée et vérifiée dans le PE
           - Aucun terminal/fenêtre noire au double-clic : PASS
           - Progression et étapes visibles : PASS
           - Erreurs persistantes + Réessayer + diagnostic + logs : PASS
@@ -147,6 +157,7 @@ jobs:
 
           ## Validation
           - RUNTIME_V0_2_READY : true
+          - Windows 10/11 compatibility manifest : PASS sur AlinaCoder.exe + AlinaCoderSetup.exe
           - Clean-Windows bootstrap E2E : PASS
           - Provider fabric E2E : PASS
           - Visible installer E2E : PASS
@@ -218,4 +229,4 @@ jobs:
             $expected = "sha256:" + (Get-FileHash $paths[$name] -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($asset[0].digest -ne $expected) { throw "published digest mismatch for $name" }
           }
-          Write-Host "v0.2.0 publication verified with visible installer at $env:SOURCE_SHA"
+          Write-Host "v0.2.0 publication verified with Windows 10/11 compatibility at $env:SOURCE_SHA"
