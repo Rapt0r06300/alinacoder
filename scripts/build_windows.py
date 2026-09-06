@@ -28,7 +28,7 @@ def main() -> int:
     if not app.exists():
         raise RuntimeError("AlinaCoder.exe was not produced")
     run(
-        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile",
+        sys.executable, "-m", "PyInstaller", "--noconfirm", "--clean", "--onefile", "--windowed",
         "--name", "AlinaCoderSetup", "--paths", "src",
         "--add-binary", f"{app}{os.pathsep}.",
         "--add-data", f"{PREREQUISITE_MANIFEST}{os.pathsep}packaging",
