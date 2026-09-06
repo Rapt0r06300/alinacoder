@@ -130,6 +130,8 @@ class SpecAcceptanceMatrix:
         "desktop_ux": (
             "clean_first_run", "ordinary_chat_without_advanced_panels", "pause_resume", "all_stop",
             "plan_artifact_selection", "targeted_edit_continue", "verification_visibility", "low_idle_resource_use",
+            "live_activity_persistence", "safe_activity_redaction", "observable_run_lifecycle",
+            "responsive_message_execution", "activity_first_progressive_disclosure",
         ),
     }
 
