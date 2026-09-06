@@ -124,9 +124,11 @@ jobs:
             if (Get-Command git.exe -ErrorAction SilentlyContinue) { throw "clean-machine precondition failed: Git is still discoverable" }
             if (Get-Command ollama.exe -ErrorAction SilentlyContinue) { throw "clean-machine precondition failed: Ollama is already present on runner" }
 
+            # AlinaCoderSetup.exe is a windowed executable. Start-Process -Wait is mandatory:
+            # PowerShell's call operator does not provide a reliable synchronous boundary for it.
             # Real packaged offline failure: no false success and a resumable receipt.
-            & .\dist\AlinaCoderSetup.exe --quiet --offline --install-dir $offlineDest --model qwen3:0.6b
-            $offlineExit = $LASTEXITCODE
+            $offlineSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--offline","--install-dir",$offlineDest,"--model","qwen3:0.6b") -Wait -PassThru
+            $offlineExit = $offlineSetup.ExitCode
             if ($offlineExit -eq 0) { throw "offline clean bootstrap incorrectly reported success" }
             $offlineMeta = Get-Content (Join-Path $offlineDest "install.json") -Raw | ConvertFrom-Json
             if ($offlineMeta.bootstrap_ready) { throw "offline clean bootstrap wrote ready=true" }
@@ -134,8 +136,8 @@ jobs:
 
             # Real zero-touch bootstrap from the exact packaged setup. This must install Git,
             # Ollama and the explicitly CPU-safe model from verified official releases.
-            & .\dist\AlinaCoderSetup.exe --quiet --install-dir $dest --model qwen3:0.6b
-            if ($LASTEXITCODE -ne 0) { throw "zero-touch clean bootstrap failed with exit code $LASTEXITCODE" }
+            $cleanSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru
+            if ($cleanSetup.ExitCode -ne 0) { throw "zero-touch clean bootstrap failed with exit code $($cleanSetup.ExitCode)" }
             $managedGit = Join-Path $env:LOCALAPPDATA "Programs\AlinaCoder\Git\cmd\git.exe"
             $managedOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
             if (-not (Test-Path $managedGit)) { throw "Git was not installed by zero-touch bootstrap" }
@@ -150,20 +152,20 @@ jobs:
             $scenario.cpu_only_low_resource = @{ok=$true; source="live qwen3:0.6b CPU-safe smoke + same-SHA hardware-fit unit contract"; model="qwen3:0.6b"}
 
             # Recovery of the previously deferred/offline install now that verified prerequisites exist.
-            & .\dist\AlinaCoderSetup.exe --repair --quiet --install-dir $offlineDest --model qwen3:0.6b
-            if ($LASTEXITCODE -ne 0) { throw "offline bootstrap recovery failed" }
+            $recoverySetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--repair","--quiet","--install-dir",$offlineDest,"--model","qwen3:0.6b") -Wait -PassThru
+            if ($recoverySetup.ExitCode -ne 0) { throw "offline bootstrap recovery failed with exit code $($recoverySetup.ExitCode)" }
             $offlineRecovered = Get-Content (Join-Path $offlineDest "install.json") -Raw | ConvertFrom-Json
             if (-not $offlineRecovered.bootstrap_ready) { throw "offline bootstrap did not recover to ready" }
 
             # Compatible pre-existing dependencies: a second AlinaCoder install must classify
             # Git/Ollama as user-owned and its uninstall must not remove them or the model.
-            & .\dist\AlinaCoderSetup.exe --quiet --install-dir $preexistingDest --model qwen3:0.6b
-            if ($LASTEXITCODE -ne 0) { throw "pre-existing prerequisite setup failed" }
+            $preexistingSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--install-dir",$preexistingDest,"--model","qwen3:0.6b") -Wait -PassThru
+            if ($preexistingSetup.ExitCode -ne 0) { throw "pre-existing prerequisite setup failed with exit code $($preexistingSetup.ExitCode)" }
             $preState = Get-Content (Join-Path $preexistingDest "bootstrap-state.json") -Raw | ConvertFrom-Json
             if ($preState.components.git.origin -ne "pre_existing") { throw "pre-existing Git ownership was not preserved" }
             if ($preState.components.ollama.origin -ne "pre_existing") { throw "pre-existing Ollama ownership was not preserved" }
-            & .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $preexistingDest
-            if ($LASTEXITCODE -ne 0) { throw "pre-existing scenario uninstall failed" }
+            $preexistingUninstall = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--uninstall","--quiet","--install-dir",$preexistingDest) -Wait -PassThru
+            if ($preexistingUninstall.ExitCode -ne 0) { throw "pre-existing scenario uninstall failed with exit code $($preexistingUninstall.ExitCode)" }
             if (-not (Test-Path $managedGit) -or -not (Test-Path $managedOllama)) { throw "pre-existing dependencies were removed" }
             $modelsAfter = & $managedOllama list
             $modelsAfterText = ($modelsAfter -join "`n")
@@ -180,12 +182,12 @@ jobs:
             # Full packaged lifecycle on the managed clean installation. Upgrade is intentionally
             # same-channel/no-op; provenance retention makes rollback deterministic and exact.
             Set-Content -Path (Join-Path $dest "user-state.json") -Value '{"preserve":true}' -Encoding utf8
-            & .\dist\AlinaCoderSetup.exe --repair --quiet --install-dir $dest --model qwen3:0.6b
-            if ($LASTEXITCODE -ne 0) { throw "repair failed with exit code $LASTEXITCODE" }
-            & .\dist\AlinaCoderSetup.exe --upgrade --quiet --install-dir $dest --model qwen3:0.6b
-            if ($LASTEXITCODE -ne 0) { throw "upgrade failed with exit code $LASTEXITCODE" }
-            & .\dist\AlinaCoderSetup.exe --rollback --quiet --install-dir $dest
-            if ($LASTEXITCODE -ne 0) { throw "rollback failed with exit code $LASTEXITCODE" }
+            $repairSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--repair","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru
+            if ($repairSetup.ExitCode -ne 0) { throw "repair failed with exit code $($repairSetup.ExitCode)" }
+            $upgradeSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--upgrade","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru
+            if ($upgradeSetup.ExitCode -ne 0) { throw "upgrade failed with exit code $($upgradeSetup.ExitCode)" }
+            $rollbackSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--rollback","--quiet","--install-dir",$dest) -Wait -PassThru
+            if ($rollbackSetup.ExitCode -ne 0) { throw "rollback failed with exit code $($rollbackSetup.ExitCode)" }
             if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "lifecycle removed user data" }
 
             $proc = Start-Process -FilePath (Join-Path $dest "AlinaCoder.exe") -ArgumentList "--self-test" -Wait -PassThru
@@ -207,8 +209,8 @@ jobs:
             if (-not $mission.ok -or $mission.branch -ne "main") { throw "packaged acceptance mission evidence failed" }
             Copy-Item $desktopEvidence .\dist\desktop-acceptance-evidence.json
 
-            & .\dist\AlinaCoderSetup.exe --uninstall --quiet --install-dir $dest
-            if ($LASTEXITCODE -ne 0) { throw "uninstaller failed with exit code $LASTEXITCODE" }
+            $uninstallSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--uninstall","--quiet","--install-dir",$dest) -Wait -PassThru
+            if ($uninstallSetup.ExitCode -ne 0) { throw "uninstaller failed with exit code $($uninstallSetup.ExitCode)" }
             if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left application executable behind" }
             if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "uninstall violated user-data retention policy" }
             $scenario.lifecycle = @{ok=$true; source="packaged install→repair→upgrade→rollback→mission→uninstall"}
