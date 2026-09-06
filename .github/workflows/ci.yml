@@ -150,7 +150,7 @@ jobs:
           if ($signature.Status -ne "Valid") { throw "prefetched Ollama installer Authenticode verification failed: $($signature.Status)" }
 
       - name: LOT 19 clean Windows bootstrap E2E and lifecycle matrix
-        timeout-minutes: 20
+        timeout-minutes: 30
         shell: pwsh
         env:
           PYTHONPATH: src
@@ -169,6 +169,42 @@ jobs:
           $scenario = [ordered]@{}
           Remove-Item -Recurse -Force $dest,$offlineDest,$preexistingDest,$fixture,$hiddenGit -ErrorAction SilentlyContinue
 
+          function Invoke-Lot19Setup {
+            param(
+              [string]$Label,
+              [string[]]$Arguments,
+              [string]$InstallDir,
+              [int]$TimeoutSeconds = 180
+            )
+            Write-Host "LOT19 setup start: $Label"
+            $process = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList $Arguments -PassThru
+            if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+              Write-Host "LOT19 setup timeout: $Label after ${TimeoutSeconds}s"
+              Write-Host "=== relevant Windows processes ==="
+              Get-CimInstance Win32_Process |
+                Where-Object {
+                  ($_.Name -match '(?i)AlinaCoderSetup|OllamaSetup|ollama') -or
+                  ($_.CommandLine -match '(?i)AlinaCoderSetup|OllamaSetup|ollama')
+                } |
+                Select-Object Name,ProcessId,ParentProcessId,CommandLine |
+                Format-Table -AutoSize | Out-String | Write-Host
+              foreach ($name in @("install.json","bootstrap-state.json","bootstrap-receipt.json")) {
+                $candidate = Join-Path $InstallDir $name
+                if (Test-Path $candidate) {
+                  Write-Host "=== $Label / $name ==="
+                  Get-Content $candidate -Raw | Write-Host
+                }
+                else {
+                  Write-Host "=== $Label / $name missing ==="
+                }
+              }
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "LOT19 setup '$Label' exceeded its bounded process budget"
+            }
+            Write-Host "LOT19 setup complete: $Label exit=$($process.ExitCode)"
+            return $process
+          }
+
           try {
             # The hosted image contains Git by default. Hide it for this step so the packaged
             # setup sees the same prerequisite closure as a clean end-user Windows machine.
@@ -180,10 +216,10 @@ jobs:
             if (Get-Command git.exe -ErrorAction SilentlyContinue) { throw "clean-machine precondition failed: Git is still discoverable" }
             if (Get-Command ollama.exe -ErrorAction SilentlyContinue) { throw "clean-machine precondition failed: Ollama is already present on runner" }
 
-            # AlinaCoderSetup.exe is a windowed executable. Start-Process -Wait is mandatory:
-            # PowerShell's call operator does not provide a reliable synchronous boundary for it.
+            # AlinaCoderSetup.exe is windowed and can spawn persistent Ollama children.
+            # Wait only on the setup process object; Start-Process -Wait would wait descendants too.
             # Real packaged offline failure: no false success and a resumable receipt.
-            $offlineSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--offline","--install-dir",$offlineDest,"--model","qwen3:0.6b") -Wait -PassThru
+            $offlineSetup = Invoke-Lot19Setup -Label "offline" -Arguments @("--quiet","--offline","--install-dir",$offlineDest,"--model","qwen3:0.6b") -InstallDir $offlineDest -TimeoutSeconds 60
             $offlineExit = $offlineSetup.ExitCode
             if ($offlineExit -eq 0) { throw "offline clean bootstrap incorrectly reported success" }
             $offlineMeta = Get-Content (Join-Path $offlineDest "install.json") -Raw | ConvertFrom-Json
@@ -192,7 +228,7 @@ jobs:
 
             # Real zero-touch bootstrap from the exact packaged setup. This must install Git,
             # Ollama and the explicitly CPU-safe model from verified official releases.
-            $cleanSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru
+            $cleanSetup = Invoke-Lot19Setup -Label "clean" -Arguments @("--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -InstallDir $dest -TimeoutSeconds 900
             if ($cleanSetup.ExitCode -ne 0) { throw "zero-touch clean bootstrap failed with exit code $($cleanSetup.ExitCode)" }
             $managedGit = Join-Path $env:LOCALAPPDATA "Programs\AlinaCoder\Git\cmd\git.exe"
             $managedOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
@@ -208,19 +244,19 @@ jobs:
             $scenario.cpu_only_low_resource = @{ok=$true; source="live qwen3:0.6b CPU-safe smoke + same-SHA hardware-fit unit contract"; model="qwen3:0.6b"}
 
             # Recovery of the previously deferred/offline install now that verified prerequisites exist.
-            $recoverySetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--repair","--quiet","--install-dir",$offlineDest,"--model","qwen3:0.6b") -Wait -PassThru
+            $recoverySetup = Invoke-Lot19Setup -Label "offline-recovery" -Arguments @("--repair","--quiet","--install-dir",$offlineDest,"--model","qwen3:0.6b") -InstallDir $offlineDest -TimeoutSeconds 300
             if ($recoverySetup.ExitCode -ne 0) { throw "offline bootstrap recovery failed with exit code $($recoverySetup.ExitCode)" }
             $offlineRecovered = Get-Content (Join-Path $offlineDest "install.json") -Raw | ConvertFrom-Json
             if (-not $offlineRecovered.bootstrap_ready) { throw "offline bootstrap did not recover to ready" }
 
             # Compatible pre-existing dependencies: a second AlinaCoder install must classify
             # Git/Ollama as user-owned and its uninstall must not remove them or the model.
-            $preexistingSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--install-dir",$preexistingDest,"--model","qwen3:0.6b") -Wait -PassThru
+            $preexistingSetup = Invoke-Lot19Setup -Label "preexisting-install" -Arguments @("--quiet","--install-dir",$preexistingDest,"--model","qwen3:0.6b") -InstallDir $preexistingDest -TimeoutSeconds 300
             if ($preexistingSetup.ExitCode -ne 0) { throw "pre-existing prerequisite setup failed with exit code $($preexistingSetup.ExitCode)" }
             $preState = Get-Content (Join-Path $preexistingDest "bootstrap-state.json") -Raw | ConvertFrom-Json
             if ($preState.components.git.origin -ne "pre_existing") { throw "pre-existing Git ownership was not preserved" }
             if ($preState.components.ollama.origin -ne "pre_existing") { throw "pre-existing Ollama ownership was not preserved" }
-            $preexistingUninstall = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--uninstall","--quiet","--install-dir",$preexistingDest) -Wait -PassThru
+            $preexistingUninstall = Invoke-Lot19Setup -Label "preexisting-uninstall" -Arguments @("--uninstall","--quiet","--install-dir",$preexistingDest) -InstallDir $preexistingDest -TimeoutSeconds 120
             if ($preexistingUninstall.ExitCode -ne 0) { throw "pre-existing scenario uninstall failed with exit code $($preexistingUninstall.ExitCode)" }
             if (-not (Test-Path $managedGit) -or -not (Test-Path $managedOllama)) { throw "pre-existing dependencies were removed" }
             $modelsAfter = & $managedOllama list
@@ -238,11 +274,11 @@ jobs:
             # Full packaged lifecycle on the managed clean installation. Upgrade is intentionally
             # same-channel/no-op; provenance retention makes rollback deterministic and exact.
             Set-Content -Path (Join-Path $dest "user-state.json") -Value '{"preserve":true}' -Encoding utf8
-            $repairSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--repair","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru
+            $repairSetup = Invoke-Lot19Setup -Label "repair" -Arguments @("--repair","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -InstallDir $dest -TimeoutSeconds 300
             if ($repairSetup.ExitCode -ne 0) { throw "repair failed with exit code $($repairSetup.ExitCode)" }
-            $upgradeSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--upgrade","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru
+            $upgradeSetup = Invoke-Lot19Setup -Label "upgrade" -Arguments @("--upgrade","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -InstallDir $dest -TimeoutSeconds 300
             if ($upgradeSetup.ExitCode -ne 0) { throw "upgrade failed with exit code $($upgradeSetup.ExitCode)" }
-            $rollbackSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--rollback","--quiet","--install-dir",$dest) -Wait -PassThru
+            $rollbackSetup = Invoke-Lot19Setup -Label "rollback" -Arguments @("--rollback","--quiet","--install-dir",$dest) -InstallDir $dest -TimeoutSeconds 120
             if ($rollbackSetup.ExitCode -ne 0) { throw "rollback failed with exit code $($rollbackSetup.ExitCode)" }
             if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "lifecycle removed user data" }
 
@@ -265,7 +301,7 @@ jobs:
             if (-not $mission.ok -or $mission.branch -ne "main") { throw "packaged acceptance mission evidence failed" }
             Copy-Item $desktopEvidence .\dist\desktop-acceptance-evidence.json
 
-            $uninstallSetup = Start-Process -FilePath ".\dist\AlinaCoderSetup.exe" -ArgumentList @("--uninstall","--quiet","--install-dir",$dest) -Wait -PassThru
+            $uninstallSetup = Invoke-Lot19Setup -Label "uninstall" -Arguments @("--uninstall","--quiet","--install-dir",$dest) -InstallDir $dest -TimeoutSeconds 120
             if ($uninstallSetup.ExitCode -ne 0) { throw "uninstaller failed with exit code $($uninstallSetup.ExitCode)" }
             if (Test-Path (Join-Path $dest "AlinaCoder.exe")) { throw "uninstall left application executable behind" }
             if (-not (Test-Path (Join-Path $dest "user-state.json"))) { throw "uninstall violated user-data retention policy" }
