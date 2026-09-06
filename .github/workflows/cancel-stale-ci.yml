@@ -1,0 +1,32 @@
+name: cancel-stale-ci
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Cancel obsolete ci runs on main
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for status in in_progress queued; do
+            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?branch=main&status=${status}&per_page=100" \
+              --jq '.workflow_runs[] | "\(.id) \(.head_sha)"' |
+            while read -r run_id head_sha; do
+              [[ -z "${run_id:-}" ]] && continue
+              if [[ "$head_sha" != "$GITHUB_SHA" ]]; then
+                echo "Cancelling stale ci run $run_id ($head_sha)"
+                gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" >/dev/null || true
+              fi
+            done
+          done
