@@ -129,7 +129,9 @@ class ProviderAdapterTests(unittest.TestCase):
         self.assertEqual(response.provider_id, "openrouter")
         self.assertEqual(response.model_id, "strong:free")
         self.assertEqual(response.quota_remaining, 17)
-        self.assertNotIn("secret", json.dumps(transport.calls))
+        # The credential must cross the HTTP Authorization boundary, but it must
+        # never escape into the persistable provider response/metadata.
+        self.assertNotIn("secret", json.dumps({"text": response.text, "metadata": response.metadata}))
 
     def test_openai_429_is_classified_as_quota_exhaustion(self) -> None:
         definition = normative_provider_atlas().get("groq")
