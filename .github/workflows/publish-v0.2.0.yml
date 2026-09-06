@@ -93,8 +93,8 @@ jobs:
           SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           $ErrorActionPreference = "Stop"
-          & .\release\AlinaCoderSetup.exe --installer-ui-smoke --commit $env:SOURCE_SHA --evidence-out .\release\visible-installer-evidence.json
-          if ($LASTEXITCODE -ne 0) { throw "visible installer UI smoke failed with exit code $LASTEXITCODE" }
+          $visibleSetup = Start-Process -FilePath .\release\AlinaCoderSetup.exe -ArgumentList @("--installer-ui-smoke","--commit",$env:SOURCE_SHA,"--evidence-out",".\release\visible-installer-evidence.json") -Wait -PassThru
+          if ($visibleSetup.ExitCode -ne 0) { throw "visible installer UI smoke failed with exit code $($visibleSetup.ExitCode)" }
           $visible = Get-Content .\release\visible-installer-evidence.json -Raw | ConvertFrom-Json
           $setupSha = (Get-FileHash .\release\AlinaCoderSetup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           if (-not $visible.ok -or -not $visible.visible_installer_e2e) { throw "visible_installer_e2e is false" }
