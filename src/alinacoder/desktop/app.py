@@ -350,22 +350,32 @@ def run_gui() -> int:
                 if event_kind == "inference_complete":
                     run_id, response, text = payload
                     if workbench is not None:
-                        receipt = workbench.complete_message(run_id, response)
-                        details = receipt.get("details", {})
-                        assistant_text = str(details.get("assistant_text", "")).strip()
-                        if assistant_text:
-                            provider_id = str(details.get("provider_id", ""))
-                            model_id = str(details.get("model_id", ""))
-                            transcript.insert("end", f"AlinaCoder [{provider_id}/{model_id}]: {assistant_text}\n")
-                        if str(text).startswith("/goal "):
-                            objective = str(text)[6:].strip()
-                            goal = workbench.start_goal(
-                                objective,
-                                ["requested change implemented", "verification passes", "main commit ready"],
-                            )
-                            transcript.insert("end", f"AlinaCoder: Goal {goal.goal_id} created and persisted.\n")
-                        status.set(workbench.snapshot().get("control_state", "RUNNING"))
-                        persist()
+                        try:
+                            receipt = workbench.complete_message(run_id, response)
+                        except RuntimeError as exc:
+                            current = workbench.current_run() or {}
+                            if current.get("status") == "stopped":
+                                status.set("STOPPED")
+                                set_view("Diagnostics", "Late provider response discarded after STOP.")
+                            else:
+                                status.set("FAILED")
+                                set_view("Diagnostics", f"Completion rejected: {exc}")
+                        else:
+                            details = receipt.get("details", {})
+                            assistant_text = str(details.get("assistant_text", "")).strip()
+                            if assistant_text:
+                                provider_id = str(details.get("provider_id", ""))
+                                model_id = str(details.get("model_id", ""))
+                                transcript.insert("end", f"AlinaCoder [{provider_id}/{model_id}]: {assistant_text}\n")
+                            if str(text).startswith("/goal "):
+                                objective = str(text)[6:].strip()
+                                goal = workbench.start_goal(
+                                    objective,
+                                    ["requested change implemented", "verification passes", "main commit ready"],
+                                )
+                                transcript.insert("end", f"AlinaCoder: Goal {goal.goal_id} created and persisted.\n")
+                            status.set(workbench.snapshot().get("control_state", "RUNNING"))
+                            persist()
                         refresh_views()
                     send_button.configure(state="normal")
                     message_worker = None
@@ -373,18 +383,18 @@ def run_gui() -> int:
                     run_id, error, _text = payload
                     if workbench is not None:
                         workbench.fail_message(run_id, error)
-                        status.set("FAILED")
-                        set_view("Diagnostics", f"Inference failed: {error}")
+                        current = workbench.current_run() or {}
+                        if current.get("status") == "stopped":
+                            status.set("STOPPED")
+                            set_view("Diagnostics", "Provider error arrived after STOP; stopped state preserved.")
+                        else:
+                            status.set("FAILED")
+                            set_view("Diagnostics", f"Inference failed: {error}")
                         refresh_views()
                     send_button.configure(state="normal")
                     message_worker = None
         except queue.Empty:
             pass
-        if workbench is not None:
-            try:
-                refresh_views()
-            except Exception as exc:
-                set_view("Diagnostics", f"Activity refresh failed: {exc}")
         root.after(100, poll_agent_ui)
 
     def send_message() -> None:
