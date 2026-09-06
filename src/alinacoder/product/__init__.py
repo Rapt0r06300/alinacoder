@@ -26,4 +26,8 @@ NativeWindowsBootstrapAdapter = _windows_trust.NativeWindowsBootstrapAdapter
 ObservableWindowsBootstrapAdapter = _windows_trust.ObservableWindowsBootstrapAdapter
 _prerequisites.WindowsBootstrapAdapter = NativeWindowsBootstrapAdapter
 
+from .windows_fs_hardening import harden_windows_filesystem
+
+harden_windows_filesystem()
+
 __all__ = ["NativeWindowsBootstrapAdapter", "ObservableWindowsBootstrapAdapter"]
