@@ -73,6 +73,17 @@ _WTD_CHOICE_FILE = 1
 _WTD_STATEACTION_IGNORE = 0
 
 
+def _bounded_env_seconds(name: str, default: int, *, minimum: int = 60, maximum: int = 3600) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(value, maximum))
+
+
 def verify_windows_authenticode(path: Path | str) -> bool:
     """Fail-closed Authenticode verification through Windows WinVerifyTrust."""
 
@@ -288,9 +299,10 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
         if executable is None:
             return False
 
+        pull_timeout = _bounded_env_seconds("ALINACODER_MODEL_PULL_TIMEOUT_SECONDS", 600)
         for attempt in range(3):
             try:
-                code, _ = self._run([str(executable), "pull", model], timeout=600)
+                code, _ = self._run([str(executable), "pull", model], timeout=pull_timeout)
             except subprocess.TimeoutExpired:
                 code = -1
 
@@ -442,14 +454,15 @@ class ObservableWindowsBootstrapAdapter(NativeWindowsBootstrapAdapter):
             self._emit("model", "error", "Ollama introuvable pour télécharger le modèle", model)
             return False
 
+        pull_timeout = _bounded_env_seconds("ALINACODER_MODEL_PULL_TIMEOUT_SECONDS", 600)
         self._emit("model", "start", f"Téléchargement du modèle {model}", "Ollama reprend automatiquement un téléchargement interrompu")
         for attempt in range(3):
             self._check_cancelled()
             self._emit("model", "info", f"Téléchargement du modèle — tentative {attempt + 1}/3", model)
             try:
-                code, output = self._run([str(executable), "pull", model], timeout=600)
+                code, output = self._run([str(executable), "pull", model], timeout=pull_timeout)
             except subprocess.TimeoutExpired:
-                code, output = -1, "timeout after 600 seconds"
+                code, output = -1, f"timeout after {pull_timeout} seconds"
             if output.strip():
                 self._emit("model", "detail", "Sortie Ollama", output[-2000:])
             if code == 0:
