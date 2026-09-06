@@ -1,0 +1,97 @@
+name: patch-lot19-observable
+on:
+  push:
+    paths:
+      - .github/workflows/patch-lot19-observable.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: main
+      - name: Patch LOT19 setup process boundary
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/ci.yml')
+          text = path.read_text(encoding='utf-8')
+
+          anchor = '          Remove-Item -Recurse -Force $dest,$offlineDest,$preexistingDest,$fixture,$hiddenGit -ErrorAction SilentlyContinue\n\n'
+          helper = '''          Remove-Item -Recurse -Force $dest,$offlineDest,$preexistingDest,$fixture,$hiddenGit -ErrorAction SilentlyContinue
+
+          function Invoke-Lot19Setup {
+            param(
+              [string]$Label,
+              [string[]]$Arguments,
+              [string]$InstallDir,
+              [int]$timeoutSeconds = 180
+            )
+            Write-Host "LOT19 setup start: $Label"
+            $process = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList $Arguments -PassThru
+            if (-not $process.WaitForExit($timeoutSeconds * 1000)) {
+              Write-Host "LOT19 setup timeout: $Label after ${timeoutSeconds}s"
+              Write-Host "=== relevant Windows processes ==="
+              Get-CimInstance Win32_Process |
+                Where-Object { ($_.Name -match '(?i)AlinaCoderSetup|OllamaSetup|ollama') -or ($_.CommandLine -match '(?i)AlinaCoderSetup|OllamaSetup|ollama') } |
+                Select-Object Name,ProcessId,ParentProcessId,CommandLine |
+                Format-Table -AutoSize | Out-String | Write-Host
+              foreach ($name in @("install.json","bootstrap-state.json","bootstrap-receipt.json")) {
+                $candidate = Join-Path $InstallDir $name
+                if (Test-Path $candidate) {
+                  Write-Host "=== $Label / $name ==="
+                  Get-Content $candidate -Raw | Write-Host
+                }
+                else {
+                  Write-Host "=== $Label / $name missing ==="
+                }
+              }
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "LOT19 setup '$Label' exceeded its bounded process budget"
+            }
+            Write-Host "LOT19 setup complete: $Label exit=$($process.ExitCode)"
+            return $process
+          }
+
+'''
+          if 'function Invoke-Lot19Setup' not in text:
+              if anchor not in text:
+                  raise SystemExit('LOT19 helper insertion anchor not found')
+              text = text.replace(anchor, helper, 1)
+
+          replacements = {
+              '$offlineSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--offline","--install-dir",$offlineDest,"--model","qwen3:0.6b") -Wait -PassThru': '$offlineSetup = Invoke-Lot19Setup -Label "offline" -Arguments @("--quiet","--offline","--install-dir",$offlineDest,"--model","qwen3:0.6b") -InstallDir $offlineDest -TimeoutSeconds 60',
+              '$cleanSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru': '$cleanSetup = Invoke-Lot19Setup -Label "clean" -Arguments @("--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -InstallDir $dest -TimeoutSeconds 480',
+              '$recoverySetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--repair","--quiet","--install-dir",$offlineDest,"--model","qwen3:0.6b") -Wait -PassThru': '$recoverySetup = Invoke-Lot19Setup -Label "offline-recovery" -Arguments @("--repair","--quiet","--install-dir",$offlineDest,"--model","qwen3:0.6b") -InstallDir $offlineDest -TimeoutSeconds 180',
+              '$preexistingSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--quiet","--install-dir",$preexistingDest,"--model","qwen3:0.6b") -Wait -PassThru': '$preexistingSetup = Invoke-Lot19Setup -Label "preexisting-install" -Arguments @("--quiet","--install-dir",$preexistingDest,"--model","qwen3:0.6b") -InstallDir $preexistingDest -TimeoutSeconds 180',
+              '$preexistingUninstall = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--uninstall","--quiet","--install-dir",$preexistingDest) -Wait -PassThru': '$preexistingUninstall = Invoke-Lot19Setup -Label "preexisting-uninstall" -Arguments @("--uninstall","--quiet","--install-dir",$preexistingDest) -InstallDir $preexistingDest -TimeoutSeconds 120',
+              '$repairSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--repair","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru': '$repairSetup = Invoke-Lot19Setup -Label "repair" -Arguments @("--repair","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -InstallDir $dest -TimeoutSeconds 180',
+              '$upgradeSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--upgrade","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -Wait -PassThru': '$upgradeSetup = Invoke-Lot19Setup -Label "upgrade" -Arguments @("--upgrade","--quiet","--install-dir",$dest,"--model","qwen3:0.6b") -InstallDir $dest -TimeoutSeconds 180',
+              '$rollbackSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--rollback","--quiet","--install-dir",$dest) -Wait -PassThru': '$rollbackSetup = Invoke-Lot19Setup -Label "rollback" -Arguments @("--rollback","--quiet","--install-dir",$dest) -InstallDir $dest -TimeoutSeconds 120',
+              '$uninstallSetup = Start-Process -FilePath ".\\dist\\AlinaCoderSetup.exe" -ArgumentList @("--uninstall","--quiet","--install-dir",$dest) -Wait -PassThru': '$uninstallSetup = Invoke-Lot19Setup -Label "uninstall" -Arguments @("--uninstall","--quiet","--install-dir",$dest) -InstallDir $dest -TimeoutSeconds 120',
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'expected LOT19 invocation not found: {old[:80]}')
+              text = text.replace(old, new, 1)
+
+          text = text.replace(
+              '# AlinaCoderSetup.exe is a windowed executable. Start-Process -Wait is mandatory:\n            # PowerShell\'s call operator does not provide a reliable synchronous boundary for it.',
+              '# AlinaCoderSetup.exe is windowed. The observable process wrapper owns the explicit\n            # WaitForExit boundary, per-invocation budget, and fail-closed diagnostics.',
+              1,
+          )
+          path.write_text(text, encoding='utf-8')
+          PY
+          git rm .github/workflows/patch-lot19-observable.yml
+          git config user.name "AlinaCoder CI"
+          git config user.email "alinacoder-ci@example.invalid"
+          git add .github/workflows/ci.yml tests/test_lot19_setup_process_contract.py
+          git diff --cached --check
+          git commit -m "fix(ci): make LOT19 setup boundary observable"
+          git push origin HEAD:main
