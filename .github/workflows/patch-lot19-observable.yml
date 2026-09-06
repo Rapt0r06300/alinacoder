@@ -59,7 +59,7 @@ jobs:
             return $process
           }
 
-'''
+          '''
           if 'function Invoke-Lot19Setup' not in text:
               if anchor not in text:
                   raise SystemExit('LOT19 helper insertion anchor not found')
