@@ -1,0 +1,83 @@
+name: publish-v0.2
+
+on:
+  push:
+    paths:
+      - .github/workflows/publish-v0.2.yml
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download validated v0.2 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ARTIFACT_ID: "9974417677"
+        run: |
+          set -euo pipefail
+          gh api "/repos/${REPO}/actions/artifacts/${ARTIFACT_ID}/zip" > AlinaCoder-v0.2.0.zip
+          mkdir release
+          unzip -q AlinaCoder-v0.2.0.zip -d release
+          test -f release/AlinaCoderSetup.exe
+          test -f release/AlinaCoder.exe
+          test -f release/release-manifest.json
+          test -f release/sbom.spdx.json
+
+      - name: Verify validated artifact hashes
+        run: |
+          set -euo pipefail
+          echo "14774725c6a355779387919e73c188ca7e734cb1c5e2d5effcc795094a04041b  AlinaCoder-v0.2.0.zip" | sha256sum -c -
+          echo "495fc24f8e420bcda5ba28eca24f6d793643e57d62280bfba7c32db7f5f7e7ec  release/AlinaCoder.exe" | sha256sum -c -
+
+      - name: Publish GitHub Release v0.2.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TARGET_SHA: "ca0daf7b1d86a922911a2b5b1dd8ad4ebc2a92b8"
+        run: |
+          set -euo pipefail
+          cat > RELEASE_NOTES.md <<'EOF'
+          # AlinaCoder v0.2.0
+
+          Première release installable de **AlinaCoder v0.2** pour Windows.
+
+          ## Installation
+          1. Téléchargez **AlinaCoderSetup.exe** ci-dessous.
+          2. Lancez l'installateur.
+          3. AlinaCoder configure automatiquement les prérequis nécessaires, notamment le runtime local Ollama et Git/MinGit lorsque nécessaire.
+          4. Le modèle local est sélectionné/configuré selon les capacités de la machine.
+
+          ## Validation
+          Cette release est liée au SHA validé : `ca0daf7b1d86a922911a2b5b1dd8ad4ebc2a92b8`.
+
+          Validation finale :
+          - Clean-Windows bootstrap E2E : PASS
+          - LOT 19 : 6/6 scénarios PASS
+          - Acceptation globale : 46/46
+          - Inférence Ollama réelle : PASS
+          - Provenance/SBOM : vérifiées
+          - `RUNTIME_V0_2_READY = true`
+
+          **SHA-256 AlinaCoder.exe**
+          `495fc24f8e420bcda5ba28eca24f6d793643e57d62280bfba7c32db7f5f7e7ec`
+
+          **SHA-256 archive complète**
+          `14774725c6a355779387919e73c188ca7e734cb1c5e2d5effcc795094a04041b`
+          EOF
+
+          gh release create v0.2.0 \
+            --repo "$REPO" \
+            --target "$TARGET_SHA" \
+            --title "AlinaCoder v0.2.0" \
+            --notes-file RELEASE_NOTES.md \
+            release/AlinaCoderSetup.exe \
+            release/AlinaCoder.exe \
+            release/release-manifest.json \
+            release/sbom.spdx.json \
+            release/prerequisites-v0.2.json \
+            AlinaCoder-v0.2.0.zip
