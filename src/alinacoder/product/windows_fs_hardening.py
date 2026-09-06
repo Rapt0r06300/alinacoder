@@ -50,7 +50,9 @@ def _promote_verified_partial(
 
 
 def _bind_verified_download(adapter: type[Any]) -> None:
-    if getattr(adapter, "_alinacoder_resilient_download_guard", False):
+    # Guard per concrete class. getattr() would inherit the Native marker and could
+    # incorrectly skip the Observable GUI adapter, leaving its own override unhardened.
+    if adapter.__dict__.get("_alinacoder_resilient_download_guard", False):
         return
     original_download = adapter.download_verified
 
