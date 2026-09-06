@@ -72,13 +72,17 @@ def _bind_verified_download(adapter: type[Any]) -> None:
             # other access-denied remains fail-closed instead of being guessed away.
             if not temporary.is_file():
                 raise
-            return _promote_verified_partial(
+            recovered = _promote_verified_partial(
                 self,
                 asset,
                 temporary,
                 target,
                 require_authenticode=require_authenticode,
             )
+            emit = getattr(self, "_emit", None)
+            if callable(emit):
+                emit("download", "complete", f"Téléchargement vérifié : {asset.component}", str(asset.name))
+            return recovered
 
     resilient_download_verified.__name__ = original_download.__name__
     resilient_download_verified.__qualname__ = f"{adapter.__name__}.download_verified"
