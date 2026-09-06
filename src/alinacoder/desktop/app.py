@@ -4,6 +4,9 @@ import argparse
 import json
 from pathlib import Path
 
+from alinacoder.intelligence_mesh.credentials import ProviderCredentialVault
+from alinacoder.intelligence_mesh.provider_atlas import normative_provider_atlas
+
 from .core import DesktopControlPlane, DesktopStateStore, WorkbenchModel, self_test
 from .experience import FirstRunOnboarding, VoiceInputAdapter
 from .workbench import DesktopWorkbench, run_acceptance_e2e
@@ -15,6 +18,9 @@ _PRODUCT_CAPABILITIES = frozenset(
         "first_run_onboarding",
         "voice_input",
         "provider_configuration",
+        "secure_provider_credentials",
+        "provider_settings_ui",
+        "real_zero_cost_provider_fabric",
         "local_runtime_configuration",
         "persistent_project_session",
         "goal_controls",
@@ -37,6 +43,10 @@ def _default_runtime_state_path() -> Path:
     return Path.home() / ".alinacoder" / "canonical.sqlite"
 
 
+def _default_credential_path() -> Path:
+    return Path.home() / ".alinacoder" / "provider-credentials.json"
+
+
 def run_gui() -> int:
     import tkinter as tk
     from tkinter import filedialog, messagebox, simpledialog, ttk
@@ -53,6 +63,8 @@ def run_gui() -> int:
     state = store.load()
     onboarding = FirstRunOnboarding.from_dict(state.get("onboarding"))
     voice = VoiceInputAdapter()
+    credential_vault = ProviderCredentialVault(_default_credential_path())
+    provider_atlas = normative_provider_atlas()
     workbench: DesktopWorkbench | None = None
 
     root.columnconfigure(0, weight=1)
@@ -142,6 +154,75 @@ def run_gui() -> int:
                 set_view("Plan", json.dumps(goal.to_dict(), indent=2, ensure_ascii=False))
             except Exception:
                 pass
+
+    def configure_providers() -> None:
+        candidates = [entry for entry in provider_atlas.active() if entry.auth_env]
+        window = tk.Toplevel(root)
+        window.title("Zero-cost Provider Settings")
+        window.geometry("760x440")
+        window.transient(root)
+        window.columnconfigure(0, weight=1)
+        window.rowconfigure(1, weight=1)
+        ttk.Label(
+            window,
+            text="Provider keys are encrypted with Windows DPAPI. A key alone never enables paid usage: zero-cost/account safety is re-proven before routing.",
+            wraplength=720,
+        ).grid(row=0, column=0, sticky="ew", padx=12, pady=10)
+        listing = tk.Listbox(window, exportselection=False)
+        listing.grid(row=1, column=0, sticky="nsew", padx=12)
+        status_text = tk.StringVar(value="Select a provider")
+        notes_text = tk.StringVar(value="")
+        ttk.Label(window, textvariable=status_text).grid(row=2, column=0, sticky="w", padx=12, pady=(8, 0))
+        ttk.Label(window, textvariable=notes_text, wraplength=720).grid(row=3, column=0, sticky="ew", padx=12, pady=(2, 8))
+        for entry in candidates:
+            listing.insert("end", f"{entry.label} ({entry.provider_id})")
+
+        def selected_entry():
+            selection = listing.curselection()
+            if not selection:
+                return None
+            return candidates[int(selection[0])]
+
+        def refresh_provider_status(_event=None) -> None:
+            entry = selected_entry()
+            if entry is None:
+                status_text.set("Select a provider")
+                notes_text.set("")
+                return
+            connected = credential_vault.has(entry.provider_id)
+            status_text.set(f"{entry.label}: {'credential stored' if connected else 'credential not configured'}")
+            notes_text.set(entry.notes or "Exact zero-cost qualification is required before use.")
+
+        def save_provider_key() -> None:
+            entry = selected_entry()
+            if entry is None:
+                return
+            value = simpledialog.askstring(
+                f"{entry.label} credential",
+                "Paste the provider API key/token. It will be encrypted locally with Windows DPAPI.",
+                show="*",
+                parent=window,
+            )
+            if value:
+                credential_vault.put(entry.provider_id, value)
+                refresh_provider_status()
+
+        def remove_provider_key() -> None:
+            entry = selected_entry()
+            if entry is None:
+                return
+            credential_vault.delete(entry.provider_id)
+            refresh_provider_status()
+
+        listing.bind("<<ListboxSelect>>", refresh_provider_status)
+        actions = ttk.Frame(window)
+        actions.grid(row=4, column=0, sticky="ew", padx=12, pady=10)
+        ttk.Button(actions, text="Add / Replace Key", command=save_provider_key).pack(side="left", padx=(0, 6))
+        ttk.Button(actions, text="Remove Key", command=remove_provider_key).pack(side="left", padx=6)
+        ttk.Button(actions, text="Close", command=window.destroy).pack(side="right")
+        if candidates:
+            listing.selection_set(0)
+            refresh_provider_status()
 
     def open_project(path: str | None = None) -> None:
         nonlocal workbench
@@ -278,6 +359,7 @@ def run_gui() -> int:
             messagebox.showerror("Commit failed", str(exc))
 
     ttk.Button(controls, text="First-run Setup", command=configure_first_run, name="setup").pack(side="left", padx=2)
+    ttk.Button(controls, text="Providers", command=configure_providers, name="provider_settings").pack(side="left", padx=2)
     ttk.Button(controls, text="Open Project", command=open_project, name="open_project").pack(side="left", padx=2)
     for label, action in [("Pause", "pause"), ("Resume", "resume"), ("STOP", "stop"), ("Takeover", "takeover")]:
         ttk.Button(controls, text=label, command=lambda action=action: set_control(action), name=label.lower()).pack(side="left", padx=2)
