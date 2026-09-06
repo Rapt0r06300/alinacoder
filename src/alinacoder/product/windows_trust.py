@@ -207,6 +207,18 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
         except (OSError, zipfile.BadZipFile) as exc:
             raise BootstrapError("verified MinGit archive could not be extracted") from exc
 
+    def _replace_directory_with_retry(self, source: Path, destination: Path, *, attempts: int = 8) -> None:
+        """Retry transient Windows access-denied directory promotions without elevation."""
+
+        for attempt in range(attempts):
+            try:
+                source.replace(destination)
+                return
+            except PermissionError:
+                if attempt + 1 >= attempts:
+                    raise
+                self._sleep(min(0.15 * (2**attempt), 2.0))
+
     def _install_mingit(self, *, operation: str) -> ComponentReceipt:
         policy = self._policy("git")
         asset = self.latest_asset("git")
@@ -233,10 +245,10 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
 
         shutil.rmtree(backup, ignore_errors=True)
         if root.exists():
-            root.replace(backup)
+            self._replace_directory_with_retry(root, backup)
         try:
             root.parent.mkdir(parents=True, exist_ok=True)
-            staging.replace(root)
+            self._replace_directory_with_retry(staging, root)
             managed_git = root / "cmd" / "git.exe"
             code, output = self._run([str(managed_git), "--version"], timeout=30)
             if code != 0 or not version_at_least(output, policy.minimum_version):
@@ -244,7 +256,7 @@ class NativeWindowsBootstrapAdapter(_PowerShellWindowsBootstrapAdapter):
         except Exception:
             shutil.rmtree(root, ignore_errors=True)
             if backup.exists():
-                backup.replace(root)
+                self._replace_directory_with_retry(backup, root)
             raise
         shutil.rmtree(backup, ignore_errors=True)
 
