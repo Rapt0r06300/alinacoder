@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
+import threading
 from pathlib import Path
 
 from alinacoder.intelligence_mesh.credentials import ProviderCredentialVault
 from alinacoder.intelligence_mesh.provider_atlas import normative_provider_atlas
 from alinacoder.intelligence_mesh.runtime import build_default_inference_fabric
 
+from .activity import sanitize_activity_details
 from .core import DesktopControlPlane, DesktopStateStore, WorkbenchModel, self_test
 from .experience import FirstRunOnboarding, VoiceInputAdapter
 from .workbench import DesktopWorkbench, run_acceptance_e2e
@@ -28,6 +31,9 @@ _PRODUCT_CAPABILITIES = frozenset(
         "diff_test_git_inspectors",
         "stop_pause_resume_takeover",
         "semantic_ui_oracle",
+        "live_activity_stream",
+        "responsive_agent_workbench",
+        "safe_explainable_activity_trace",
     }
 )
 
@@ -46,6 +52,22 @@ def _default_runtime_state_path() -> Path:
 
 def _default_credential_path() -> Path:
     return Path.home() / ".alinacoder" / "provider-credentials.json"
+
+
+def _format_activity(events: list[dict]) -> str:
+    lines: list[str] = []
+    for raw in events:
+        event = sanitize_activity_details(raw)
+        timestamp = str(event.get("timestamp", ""))
+        clock = timestamp[11:19] if len(timestamp) >= 19 else timestamp
+        status = str(event.get("status", "info")).upper()
+        summary = str(event.get("summary", ""))
+        details = sanitize_activity_details(event.get("details", {}))
+        suffix = ""
+        if details:
+            suffix = "  " + json.dumps(details, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        lines.append(f"{clock}  {status:<8} {summary}{suffix}")
+    return "\n".join(lines) if lines else "No activity yet."
 
 
 def run_gui() -> int:
@@ -67,6 +89,9 @@ def run_gui() -> int:
     credential_vault = ProviderCredentialVault(_default_credential_path())
     provider_atlas = normative_provider_atlas()
     workbench: DesktopWorkbench | None = None
+    ui_events: queue.Queue[tuple[str, object]] = queue.Queue()
+    message_worker: threading.Thread | None = None
+    last_activity_count = 0
 
     root.columnconfigure(0, weight=1)
     root.rowconfigure(1, weight=1)
@@ -90,7 +115,7 @@ def run_gui() -> int:
     body.grid(row=1, column=0, sticky="nsew")
     chat = ttk.Frame(body)
     inspector = ttk.Notebook(body)
-    body.add(chat, weight=3)
+    body.add(chat, weight=4)
     body.add(inspector, weight=2)
     chat.columnconfigure(0, weight=1)
     chat.rowconfigure(0, weight=1)
@@ -109,7 +134,7 @@ def run_gui() -> int:
     controls.grid(row=2, column=0, columnspan=3, sticky="ew", padx=8, pady=(0, 8))
 
     inspector_frames: dict[str, tk.Text] = {}
-    for name in ["Plan", "Context", "Diff", "Tests", "Git", "Receipts", "Run Inspector", "Timeline", "Diagnostics"]:
+    for name in ["Activity", "Plan", "Diff", "Tests", "Git", "Receipts", "Run Inspector", "Diagnostics", "Context"]:
         frame = ttk.Frame(inspector)
         frame.columnconfigure(0, weight=1)
         frame.rowconfigure(0, weight=1)
@@ -138,10 +163,16 @@ def run_gui() -> int:
         )
 
     def refresh_views() -> None:
+        nonlocal last_activity_count
         if workbench is None:
             return
         snap = workbench.snapshot()
+        events = workbench.activity()
+        if len(events) != last_activity_count:
+            set_view("Activity", _format_activity(events))
+            last_activity_count = len(events)
         set_view("Context", json.dumps(snap, indent=2, ensure_ascii=False, sort_keys=True))
+        set_view("Run Inspector", json.dumps(workbench.current_run() or {}, indent=2, ensure_ascii=False, sort_keys=True))
         try:
             set_view("Diff", workbench.git.diff(workbench.workspace))
             set_view("Git", json.dumps(workbench.status(), indent=2, sort_keys=True))
@@ -153,8 +184,10 @@ def run_gui() -> int:
             try:
                 goal = workbench.goals.get_goal(goal_id)
                 set_view("Plan", json.dumps(goal.to_dict(), indent=2, ensure_ascii=False))
-            except Exception:
-                pass
+            except Exception as exc:
+                set_view("Diagnostics", f"Plan refresh failed: {exc}")
+        else:
+            set_view("Plan", "No active goal.")
 
     def configure_providers() -> None:
         candidates = [entry for entry in provider_atlas.active() if entry.auth_env]
@@ -226,7 +259,10 @@ def run_gui() -> int:
             refresh_provider_status()
 
     def open_project(path: str | None = None) -> None:
-        nonlocal workbench
+        nonlocal workbench, last_activity_count
+        if message_worker is not None and message_worker.is_alive():
+            messagebox.showinfo("Agent busy", "Stop or finish the active response before switching project.")
+            return
         selected = path or filedialog.askdirectory(title="Open Git project")
         if not selected:
             return
@@ -247,10 +283,12 @@ def run_gui() -> int:
             project_text.set(project["path"])
             inference_text.set(f"{mode}/{onboarding.local_runtime or '-'}")
             status.set(workbench.snapshot().get("control_state", "RUNNING"))
+            last_activity_count = 0
             transcript.insert(
                 "end",
                 f"\n[system] Opened {project['path']} on {project['branch']} — providers: {', '.join(inference_fabric.provider_ids()) or 'none'}\n",
             )
+            transcript.see("end")
             persist()
             refresh_views()
         except Exception as exc:
@@ -294,33 +332,89 @@ def run_gui() -> int:
         except Exception as exc:
             messagebox.showerror("Onboarding failed", str(exc))
 
+    def inference_worker(request: dict, text: str) -> None:
+        try:
+            response = workbench.perform_inference(request) if workbench is not None else None
+            if response is None:
+                raise RuntimeError("workbench closed during inference")
+        except Exception as exc:
+            ui_events.put(("inference_error", (str(request["run_id"]), str(exc), text)))
+        else:
+            ui_events.put(("inference_complete", (str(request["run_id"]), response, text)))
+
+    def poll_agent_ui() -> None:
+        nonlocal message_worker
+        try:
+            while True:
+                event_kind, payload = ui_events.get_nowait()
+                if event_kind == "inference_complete":
+                    run_id, response, text = payload
+                    if workbench is not None:
+                        receipt = workbench.complete_message(run_id, response)
+                        details = receipt.get("details", {})
+                        assistant_text = str(details.get("assistant_text", "")).strip()
+                        if assistant_text:
+                            provider_id = str(details.get("provider_id", ""))
+                            model_id = str(details.get("model_id", ""))
+                            transcript.insert("end", f"AlinaCoder [{provider_id}/{model_id}]: {assistant_text}\n")
+                        if str(text).startswith("/goal "):
+                            objective = str(text)[6:].strip()
+                            goal = workbench.start_goal(
+                                objective,
+                                ["requested change implemented", "verification passes", "main commit ready"],
+                            )
+                            transcript.insert("end", f"AlinaCoder: Goal {goal.goal_id} created and persisted.\n")
+                        status.set(workbench.snapshot().get("control_state", "RUNNING"))
+                        persist()
+                        refresh_views()
+                    send_button.configure(state="normal")
+                    message_worker = None
+                elif event_kind == "inference_error":
+                    run_id, error, _text = payload
+                    if workbench is not None:
+                        workbench.fail_message(run_id, error)
+                        status.set("FAILED")
+                        set_view("Diagnostics", f"Inference failed: {error}")
+                        refresh_views()
+                    send_button.configure(state="normal")
+                    message_worker = None
+        except queue.Empty:
+            pass
+        if workbench is not None:
+            try:
+                refresh_views()
+            except Exception as exc:
+                set_view("Diagnostics", f"Activity refresh failed: {exc}")
+        root.after(100, poll_agent_ui)
+
     def send_message() -> None:
+        nonlocal message_worker
         if workbench is None:
             messagebox.showinfo("Project required", "Open a Git project first.")
+            return
+        if message_worker is not None and message_worker.is_alive():
             return
         text = composer.get().strip()
         if not text:
             return
         try:
-            receipt = workbench.send_message(text)
             transcript.insert("end", f"\nYou: {text}\n")
-            details = receipt.get("details", {})
-            assistant_text = str(details.get("assistant_text", "")).strip()
-            if assistant_text:
-                provider_id = str(details.get("provider_id", ""))
-                model_id = str(details.get("model_id", ""))
-                transcript.insert("end", f"AlinaCoder [{provider_id}/{model_id}]: {assistant_text}\n")
-            if text.startswith("/goal "):
-                objective = text[6:].strip()
-                goal = workbench.start_goal(
-                    objective,
-                    ["requested change implemented", "verification passes", "main commit ready"],
-                )
-                transcript.insert("end", f"AlinaCoder: Goal {goal.goal_id} created and persisted.\n")
+            transcript.see("end")
             composer.delete(0, "end")
+            request = workbench.begin_message(text)
+            status.set("WORKING")
+            send_button.configure(state="disabled")
             persist()
             refresh_views()
+            message_worker = threading.Thread(
+                target=inference_worker,
+                args=(request, text),
+                daemon=True,
+                name=f"alinacoder-{request['run_id']}",
+            )
+            message_worker.start()
         except Exception as exc:
+            send_button.configure(state="normal")
             messagebox.showerror("Action failed", str(exc))
 
     def capture_voice() -> None:
@@ -397,6 +491,7 @@ def run_gui() -> int:
     root.protocol("WM_DELETE_WINDOW", on_close)
     root.geometry("1200x760")
     composer.focus_set()
+    root.after(100, poll_agent_ui)
 
     last_project = onboarding.project_path or state.get("project")
     if onboarding.complete and last_project and Path(last_project).joinpath(".git").exists():
