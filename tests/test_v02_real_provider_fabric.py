@@ -1,10 +1,18 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from alinacoder.intelligence_mesh.provider_atlas import (
     ProviderSafetyClass,
     normative_provider_atlas,
+)
+from alinacoder.intelligence_mesh.providers import (
+    GeminiProvider,
+    HttpResult,
+    OllamaProvider,
+    OpenAICompatibleProvider,
+    ProviderError,
 )
 
 
@@ -28,6 +36,22 @@ EXPECTED_ACTIVE_PROVIDER_IDS = {
     "cerebras",
     "opencode_zen",
 }
+
+
+class QueueTransport:
+    def __init__(self, *results: HttpResult) -> None:
+        self.results = list(results)
+        self.calls: list[dict[str, object]] = []
+
+    def request(self, method: str, url: str, *, headers: dict[str, str], payload: dict | None, timeout: float) -> HttpResult:
+        self.calls.append({"method": method, "url": url, "headers": dict(headers), "payload": payload, "timeout": timeout})
+        if not self.results:
+            raise AssertionError("unexpected transport call")
+        return self.results.pop(0)
+
+
+def result(status: int, body: dict, headers: dict[str, str] | None = None) -> HttpResult:
+    return HttpResult(status=status, headers=headers or {}, body=json.dumps(body).encode("utf-8"))
 
 
 class ProviderAtlasTests(unittest.TestCase):
@@ -71,6 +95,79 @@ class ProviderAtlasTests(unittest.TestCase):
             entry = atlas.get(provider_id)
             self.assertTrue(entry.account_proof_required)
             self.assertFalse(entry.structurally_auto_admissible)
+
+
+class ProviderAdapterTests(unittest.TestCase):
+    def test_openai_discovery_preserves_exact_price_and_completion_parses_quota(self) -> None:
+        definition = normative_provider_atlas().get("openrouter")
+        transport = QueueTransport(
+            result(
+                200,
+                {
+                    "data": [
+                        {"id": "strong:free", "pricing": {"prompt": "0", "completion": "0", "request": "0"}, "context_length": 262144},
+                        {"id": "paid", "pricing": {"prompt": "0.1", "completion": "0.2", "request": "0"}, "context_length": 131072},
+                    ]
+                },
+            ),
+            result(
+                200,
+                {"choices": [{"message": {"content": "done"}}]},
+                {"x-ratelimit-remaining-requests": "17", "x-ratelimit-reset": "42"},
+            ),
+        )
+        provider = OpenAICompatibleProvider(definition, api_key="secret", transport=transport)
+
+        models = provider.discover()
+        self.assertEqual([model.model_id for model in models], ["strong:free", "paid"])
+        self.assertTrue(models[0].zero_price)
+        self.assertFalse(models[1].zero_price)
+        self.assertEqual(models[0].context_tokens, 262144)
+
+        response = provider.complete("strong:free", [{"role": "user", "content": "hi"}])
+        self.assertEqual(response.text, "done")
+        self.assertEqual(response.provider_id, "openrouter")
+        self.assertEqual(response.model_id, "strong:free")
+        self.assertEqual(response.quota_remaining, 17)
+        self.assertNotIn("secret", json.dumps(transport.calls))
+
+    def test_openai_429_is_classified_as_quota_exhaustion(self) -> None:
+        definition = normative_provider_atlas().get("groq")
+        transport = QueueTransport(result(429, {"error": {"message": "rate limit"}}, {"retry-after": "3"}))
+        provider = OpenAICompatibleProvider(definition, api_key="secret", transport=transport)
+
+        with self.assertRaises(ProviderError) as caught:
+            provider.complete("model", [{"role": "user", "content": "hi"}])
+        self.assertEqual(caught.exception.code, "QUOTA_EXHAUSTED")
+        self.assertTrue(caught.exception.retryable)
+        self.assertEqual(caught.exception.metadata.get("retry_after"), "3")
+
+    def test_gemini_adapter_parses_native_response_and_quota_error(self) -> None:
+        definition = normative_provider_atlas().get("gemini")
+        success = QueueTransport(result(200, {"candidates": [{"content": {"parts": [{"text": "gemini answer"}]}}]}))
+        provider = GeminiProvider(definition, api_key="g-key", transport=success)
+        response = provider.complete("gemini-flash", [{"role": "user", "content": "hello"}])
+        self.assertEqual(response.text, "gemini answer")
+        self.assertEqual(response.provider_id, "gemini")
+
+        limited = GeminiProvider(definition, api_key="g-key", transport=QueueTransport(result(429, {"error": {"message": "quota"}})))
+        with self.assertRaises(ProviderError) as caught:
+            limited.complete("gemini-flash", [{"role": "user", "content": "hello"}])
+        self.assertEqual(caught.exception.code, "QUOTA_EXHAUSTED")
+
+    def test_ollama_adapter_discovers_local_models_and_completes_chat(self) -> None:
+        definition = normative_provider_atlas().get("ollama_local")
+        transport = QueueTransport(
+            result(200, {"models": [{"name": "qwen3:4b", "size": 2500000000}]}),
+            result(200, {"message": {"role": "assistant", "content": "local answer"}}),
+        )
+        provider = OllamaProvider(definition, transport=transport)
+        models = provider.discover()
+        self.assertEqual(models[0].model_id, "qwen3:4b")
+        self.assertTrue(models[0].zero_price)
+        response = provider.complete("qwen3:4b", [{"role": "user", "content": "hello"}])
+        self.assertEqual(response.text, "local answer")
+        self.assertEqual(response.provider_id, "ollama_local")
 
 
 if __name__ == "__main__":
