@@ -82,6 +82,66 @@ class Lot19MinGitBootstrapTests(unittest.TestCase):
             self.assertTrue(all(Path(call[0]).name != asset_name for call in calls))
             self.assertTrue(any(Path(call[0]) == managed_git for call in calls))
 
+    def test_transient_windows_access_denied_promoting_staging_is_retried(self) -> None:
+        archive_bytes = self._mingit_zip()
+        digest = hashlib.sha256(archive_bytes).hexdigest()
+        asset_url = (
+            "https://github.com/git-for-windows/git/releases/download/"
+            "v2.55.0.windows.5/MinGit-2.55.0.5-64-bit.zip"
+        )
+        release = {
+            "html_url": "https://github.com/git-for-windows/git/releases/tag/v2.55.0.windows.5",
+            "tag_name": "v2.55.0.windows.5",
+            "assets": [
+                {
+                    "name": "MinGit-2.55.0.5-64-bit.zip",
+                    "digest": f"sha256:{digest}",
+                    "browser_download_url": asset_url,
+                }
+            ],
+        }
+
+        def runner(args: list[str], *, timeout: int = 300):
+            if Path(args[0]).name.lower() == "git.exe":
+                return 0, "git version 2.55.0.windows.5"
+            return 0, ""
+
+        original_replace = Path.replace
+        promotion_attempts = 0
+
+        def flaky_replace(source: Path, target: str | os.PathLike[str]) -> Path:
+            nonlocal promotion_attempts
+            destination = Path(target)
+            if source.name == "Git.alinacoder-staging" and destination.name == "Git":
+                promotion_attempts += 1
+                if promotion_attempts == 1:
+                    error = PermissionError(5, "Access is denied", str(source), str(destination))
+                    error.winerror = 5
+                    raise error
+            return original_replace(source, target)
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            local = root / "LocalAppData"
+            state = root / "AlinaCoder"
+            with patch.dict(os.environ, {"LOCALAPPDATA": str(local)}, clear=False), patch.object(
+                Path, "replace", new=flaky_replace
+            ):
+                adapter = NativeWindowsBootstrapAdapter(
+                    state,
+                    self.manifest,
+                    download_bytes=lambda _: archive_bytes,
+                    command_runner=runner,
+                    json_loader=lambda _: release,
+                    sleep=lambda _: None,
+                )
+                receipt = adapter.install_component("git", operation="install")
+
+            managed_git = local / "Programs" / "AlinaCoder" / "Git" / "cmd" / "git.exe"
+            self.assertTrue(receipt.healthy)
+            self.assertTrue(managed_git.is_file())
+            self.assertGreaterEqual(promotion_attempts, 2)
+
     def test_git_executor_resolves_alinacoder_managed_mingit_without_path_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             local = Path(td) / "LocalAppData"
