@@ -20,16 +20,34 @@ class CostProofReceipt:
     verified_at: datetime
     expires_at: datetime
     hard_overage_block: bool
+    billing_class: str = "ZERO_PRICE_MODEL"
+    sponsored_credit_remaining_usd: float = 0.0
+    auto_recharge_disabled: bool = False
+    byok_fallback_disabled: bool = False
+    paid_fallback_disabled: bool = False
 
     def is_admissible(self, now: datetime) -> bool:
-        return (
-            self.verdict == "PROVEN_ZERO_COST"
-            and self.prompt_price == 0.0
-            and self.completion_price == 0.0
-            and self.request_price == 0.0
-            and self.hard_overage_block
-            and self.verified_at <= now <= self.expires_at
-        )
+        fresh = self.verified_at <= now <= self.expires_at
+        if not fresh or not self.hard_overage_block:
+            return False
+        if self.verdict == "PROVEN_ZERO_COST":
+            return (
+                self.prompt_price == 0.0
+                and self.completion_price == 0.0
+                and self.request_price == 0.0
+            )
+        if self.verdict == "SPONSORED_CREDIT_HARD_STOP":
+            return (
+                self.billing_class == "SPONSORED_CREDIT_HARD_STOP"
+                and self.prompt_price >= 0.0
+                and self.completion_price >= 0.0
+                and self.request_price >= 0.0
+                and self.sponsored_credit_remaining_usd > 0.0
+                and self.auto_recharge_disabled
+                and self.byok_fallback_disabled
+                and self.paid_fallback_disabled
+            )
+        return False
 
 
 @dataclass
