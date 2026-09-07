@@ -10,6 +10,7 @@ class ProviderSafetyClass(str, Enum):
     NO_PAYMENT_METHOD_FREE_TIER = "NO_PAYMENT_METHOD_FREE_TIER"
     FREE_MODE_PAYG_DISABLED = "FREE_MODE_PAYG_DISABLED"
     LOCAL_NO_API_BILLING = "LOCAL_NO_API_BILLING"
+    SPONSORED_CREDIT_HARD_STOP = "SPONSORED_CREDIT_HARD_STOP"
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,12 +68,13 @@ _HARD = (ProviderSafetyClass.HARD_STOP_FREE_QUOTA,)
 _NO_CARD = (ProviderSafetyClass.NO_PAYMENT_METHOD_FREE_TIER,)
 _PAYG_OFF = (ProviderSafetyClass.FREE_MODE_PAYG_DISABLED,)
 _LOCAL = (ProviderSafetyClass.LOCAL_NO_API_BILLING,)
+_SPONSORED = (ProviderSafetyClass.SPONSORED_CREDIT_HARD_STOP,)
 
 
 def normative_provider_atlas() -> ProviderAtlas:
     """Return the v0.2 provider discovery atlas.
 
-    The atlas describes candidates and their qualification boundary.  It does
+    The atlas describes candidates and their qualification boundary. It does
     not mark remote providers as free forever: every remote route is still
     requalified immediately before dispatch by the runtime fabric.
     """
@@ -94,6 +96,25 @@ def normative_provider_atlas() -> ProviderAtlas:
                 "https://kilo.ai/docs/gateway/usage-and-billing",
             ),
             notes="Only exact current zero-price/free routes; provider-side paid fallback is forbidden.",
+        ),
+        ProviderDefinition(
+            "experiential_gateway",
+            "Experiential Labs",
+            "openai_chat",
+            "https://api.experientiallabs.ai/v1",
+            "https://api.experientiallabs.ai/v1/models",
+            "EXPERIENTIAL_API_KEY",
+            _SPONSORED,
+            account_proof_required=True,
+            structurally_auto_admissible=False,
+            aggregator=True,
+            source_urls=(
+                "https://platform.experientiallabs.ai/docs",
+                "https://platform.experientiallabs.ai/docs/billing",
+                "https://platform.experientiallabs.ai/docs/models",
+                "https://www.experientiallabs.ai/security",
+            ),
+            notes="Positive list-price routes require fresh platform-funded sponsored-credit proof with auto-recharge, BYOK fallback and paid fallback disabled. Exact zero-price routes still require independent zero-cost proof.",
         ),
         ProviderDefinition(
             "zai",
