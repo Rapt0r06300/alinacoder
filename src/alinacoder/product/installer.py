@@ -19,6 +19,7 @@ from .prerequisites import (
     PrerequisiteManifest,
     WindowsBootstrapAdapter,
 )
+from .self_healing import run_self_healing_operation
 from .windows_fs import replace_with_retry, unlink_with_retry
 
 
@@ -474,6 +475,18 @@ def _write_failure_receipt_if_missing(args: argparse.Namespace, exc: BaseExcepti
         pass
 
 
+def _cli_self_healing_operation(args: argparse.Namespace, operation: str) -> Path:
+    factory = None if args.deferred_prerequisites else (lambda: build_bootstrapper(args.install_dir))
+    return run_self_healing_operation(
+        args.install_dir,
+        operation=operation,
+        bootstrapper_factory=factory,
+        deferred_prerequisites=args.deferred_prerequisites,
+        online=not args.offline,
+        model=args.model,
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="AlinaCoderSetup")
     parser.add_argument("--install-dir", type=Path, default=default_install_dir())
@@ -492,8 +505,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        bootstrapper = None if args.deferred_prerequisites else build_bootstrapper(args.install_dir)
         if args.uninstall:
+            bootstrapper = None if args.deferred_prerequisites else build_bootstrapper(args.install_dir)
             uninstall(
                 args.install_dir,
                 purge_user_data=args.purge_user_data,
@@ -503,6 +516,7 @@ def main(argv: list[str] | None = None) -> int:
             if not args.quiet:
                 print(f"Uninstalled AlinaCoder from {args.install_dir}")
         elif args.rollback:
+            bootstrapper = None if args.deferred_prerequisites else build_bootstrapper(args.install_dir)
             restored = rollback(args.install_dir, bootstrapper=bootstrapper)
             if not args.quiet:
                 print("Rolled back managed prerequisites: " + ", ".join(restored))
@@ -514,47 +528,12 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             if not args.quiet:
                 print(f"Bootstrap ready with {report.selected_model}")
-        elif args.repair:
-            target = repair(
-                args.install_dir,
-                bootstrapper=bootstrapper,
-                deferred_prerequisites=args.deferred_prerequisites,
-                online=not args.offline,
-                model=args.model,
-            )
-            if not args.quiet:
-                print(f"Repaired AlinaCoder at {target}")
-        elif args.upgrade:
-            target = upgrade(
-                args.install_dir,
-                bootstrapper=bootstrapper,
-                deferred_prerequisites=args.deferred_prerequisites,
-                online=not args.offline,
-                model=args.model,
-            )
-            if not args.quiet:
-                print(f"Upgraded AlinaCoder at {target}")
         else:
-            operation = "upgrade" if (args.install_dir / "AlinaCoder.exe").exists() else "install"
-            if operation == "upgrade":
-                target = upgrade(
-                    args.install_dir,
-                    bootstrapper=bootstrapper,
-                    deferred_prerequisites=args.deferred_prerequisites,
-                    online=not args.offline,
-                    model=args.model,
-                )
-            else:
-                target = install(
-                    args.install_dir,
-                    operation=operation,
-                    bootstrapper=bootstrapper,
-                    deferred_prerequisites=args.deferred_prerequisites,
-                    online=not args.offline,
-                    model=args.model,
-                )
+            operation = _requested_operation(args)
+            target = _cli_self_healing_operation(args, operation)
             if not args.quiet:
-                print(f"Installed AlinaCoder to {target}")
+                verb = {"install": "Installed", "repair": "Repaired", "upgrade": "Upgraded"}.get(operation, "Installed")
+                print(f"{verb} AlinaCoder at {target}")
         return 0
     except Exception as exc:
         _write_failure_receipt_if_missing(args, exc)
