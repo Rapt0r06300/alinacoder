@@ -88,31 +88,32 @@ class SetupController:
         from .prerequisites import PrerequisiteBootstrapper, PrerequisiteManifest
 
         manifest = PrerequisiteManifest.load(installer._bundled_manifest())
-        adapter = ObservableWindowsBootstrapAdapter(
+        last_adapter: dict[str, ObservableWindowsBootstrapAdapter] = {}
+
+        def bootstrapper_factory() -> PrerequisiteBootstrapper:
+            adapter = ObservableWindowsBootstrapAdapter(
+                self.install_dir,
+                manifest,
+                event_sink=event_sink,
+                cancellation_token=cancellation_token,
+            )
+            last_adapter["value"] = adapter
+            return PrerequisiteBootstrapper(manifest, adapter)
+
+        operation = "upgrade" if (self.install_dir / "AlinaCoder.exe").exists() else "install"
+        target = installer.run_self_healing_operation(
             self.install_dir,
-            manifest,
+            operation=operation,
+            bootstrapper_factory=bootstrapper_factory,
+            online=True,
+            model=model,
             event_sink=event_sink,
             cancellation_token=cancellation_token,
         )
-        bootstrapper = PrerequisiteBootstrapper(manifest, adapter)
-        operation = "upgrade" if (self.install_dir / "AlinaCoder.exe").exists() else "install"
-        if operation == "upgrade":
-            target = installer.upgrade(
-                self.install_dir,
-                bootstrapper=bootstrapper,
-                online=True,
-                model=model,
-            )
-        else:
-            target = installer.install(
-                self.install_dir,
-                operation=operation,
-                bootstrapper=bootstrapper,
-                online=True,
-                model=model,
-            )
-        report = adapter.load_state()
-        selected = report.selected_model if report is not None else (model or "")
+
+        adapter = last_adapter.get("value")
+        state = adapter.load_state() if adapter is not None else None
+        selected = state.selected_model if state is not None else (model or "")
         return target, selected
 
     @staticmethod
@@ -164,13 +165,20 @@ class SetupController:
             self._snapshot = replace(
                 self._snapshot,
                 state="error",
-                message="L'installation a rencontré une erreur",
+                message="L'installation a rencontré une erreur après réparation automatique",
                 detail=detail,
                 last_error=detail,
                 can_retry=True,
                 can_launch=False,
             )
-            self.notify(SetupEvent("error", "error", "L'installation a rencontré une erreur", detail))
+            self.notify(
+                SetupEvent(
+                    "error",
+                    "error",
+                    "La réparation automatique n'a pas pu terminer l'installation",
+                    detail,
+                )
+            )
         return self._snapshot
 
     def retry(self) -> SetupSnapshot:
