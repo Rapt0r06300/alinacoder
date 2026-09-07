@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from alinacoder.intelligence_mesh import (
     CapabilityRequirement,
     CostProofReceipt,
+    ExperientialProvider,
     HttpResult,
     InferenceFabric,
     OpenAICompatibleProvider,
@@ -17,6 +18,7 @@ from alinacoder.intelligence_mesh import (
     SponsoredCreditQualification,
     normative_provider_atlas,
 )
+from alinacoder.intelligence_mesh.runtime import build_default_inference_fabric
 
 
 class _FakeProvider:
@@ -45,6 +47,11 @@ class _CaptureTransport:
     def request(self, method, url, *, headers, payload, timeout):
         self.calls.append((method, url, dict(headers), payload, timeout))
         return self.result
+
+
+class _Vault:
+    def get(self, provider_id):
+        return "xpl_runtime_secret" if provider_id == "experiential_gateway" else None
 
 
 class ExperientialFrontierGatewayTests(unittest.TestCase):
@@ -145,6 +152,29 @@ class ExperientialFrontierGatewayTests(unittest.TestCase):
         self.assertFalse(entry.structurally_auto_admissible)
         self.assertIn(ProviderSafetyClass.SPONSORED_CREDIT_HARD_STOP, entry.safe_classes)
 
+    def test_experiential_catalog_converts_micro_usd_prices_and_context(self):
+        entry = normative_provider_atlas().get("experiential_gateway")
+        transport = _CaptureTransport(
+            HttpResult(
+                200,
+                {},
+                b'{"data":[{"id":"gpt-6-astra","context_window_tokens":1050000,"pricing":{"input_micro_usd_per_million_tokens":10000000,"output_micro_usd_per_million_tokens":50000000}}]}',
+            )
+        )
+        provider = ExperientialProvider(entry, api_key="xpl_test", transport=transport)
+        models = provider.discover()
+        self.assertEqual(len(models), 1)
+        self.assertEqual(models[0].model_id, "gpt-6-astra")
+        self.assertEqual(models[0].prompt_price, 10.0)
+        self.assertEqual(models[0].completion_price, 50.0)
+        self.assertEqual(models[0].request_price, 0.0)
+        self.assertEqual(models[0].context_tokens, 1_050_000)
+        self.assertEqual(models[0].metadata["lineage"], "gpt-6-astra")
+
+    def test_default_runtime_wires_experiential_only_when_credential_exists(self):
+        fabric = build_default_inference_fabric(_Vault(), mode="free-cloud")
+        self.assertEqual(fabric.provider_ids(), ("experiential_gateway",))
+
     def test_positive_price_experiential_route_requires_sponsored_proof(self):
         now = self._now()
         definition = normative_provider_atlas().get("experiential_gateway")
@@ -172,26 +202,28 @@ class ExperientialFrontierGatewayTests(unittest.TestCase):
         atlas = normative_provider_atlas()
         exp = atlas.get("experiential_gateway")
         backup = atlas.get("openrouter")
-        primary_model = ProviderModel(
-            "experiential_gateway", "gpt-6-astra", 10.0, 50.0, 0.0,
-            capabilities={"code": 1.0}, quality_hint=0.99,
-        )
-        backup_model = ProviderModel(
-            "openrouter", "qwen-free", 0.0, 0.0, 0.0,
-            capabilities={"code": 1.0}, quality_hint=0.8,
-        )
-        primary = _FakeProvider(
-            exp,
-            [primary_model],
-            errors=[ProviderError("QUOTA_EXHAUSTED", provider_id="experiential_gateway", model_id="gpt-6-astra", retryable=True, status=429)],
-        )
-        secondary = _FakeProvider(backup, [backup_model], response_text="backup")
-        registry = QualificationRegistry()
-        registry.upsert_sponsored(self._sponsored())
-        fabric = InferenceFabric([primary, secondary], registry, now_fn=lambda: now)
-        response = fabric.complete([{"role": "user", "content": "fix"}], CapabilityRequirement({"code": 0.5}), mode="free-cloud")
-        self.assertEqual(response.text, "backup")
-        self.assertEqual(len(primary.calls), 1)
+        for code, status in (("QUOTA_EXHAUSTED", 429), ("BILLING_BLOCKED", 402)):
+            with self.subTest(code=code):
+                primary_model = ProviderModel(
+                    "experiential_gateway", "gpt-6-astra", 10.0, 50.0, 0.0,
+                    capabilities={"code": 1.0}, quality_hint=0.99,
+                )
+                backup_model = ProviderModel(
+                    "openrouter", "qwen-free", 0.0, 0.0, 0.0,
+                    capabilities={"code": 1.0}, quality_hint=0.8,
+                )
+                primary = _FakeProvider(
+                    exp,
+                    [primary_model],
+                    errors=[ProviderError(code, provider_id="experiential_gateway", model_id="gpt-6-astra", retryable=code == "QUOTA_EXHAUSTED", status=status)],
+                )
+                secondary = _FakeProvider(backup, [backup_model], response_text="backup")
+                registry = QualificationRegistry()
+                registry.upsert_sponsored(self._sponsored())
+                fabric = InferenceFabric([primary, secondary], registry, now_fn=lambda: now)
+                response = fabric.complete([{"role": "user", "content": "fix"}], CapabilityRequirement({"code": 0.5}), mode="free-cloud")
+                self.assertEqual(response.text, "backup")
+                self.assertEqual(len(primary.calls), 1)
 
     def test_generic_adapter_never_exposes_bearer_secret_in_response_metadata(self):
         definition = normative_provider_atlas().get("experiential_gateway")
