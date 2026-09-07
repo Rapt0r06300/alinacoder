@@ -1,5 +1,6 @@
 from .catalog import CatalogDrift, ProviderCatalog
 from .continuity import ContinuityEnvelope
+from .experiential import ExperientialProvider
 from .fabric import InferenceFabric
 from .models import CapabilityRequirement, CostProofReceipt, ModelRoute, RouteUnavailableError, StaleResponseError
 from .provider_atlas import ProviderAtlas, ProviderDefinition, ProviderSafetyClass, normative_provider_atlas
@@ -12,6 +13,7 @@ __all__ = [
     "CatalogDrift",
     "ContinuityEnvelope",
     "CostProofReceipt",
+    "ExperientialProvider",
     "FrontierRouter",
     "GeminiProvider",
     "HttpResult",
