@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import replace
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,7 @@ from .prerequisites import (
     PrerequisiteManifest,
     WindowsBootstrapAdapter,
 )
+from .windows_fs import replace_with_retry, unlink_with_retry
 
 
 def _bundled_exe() -> Path:
@@ -94,6 +96,109 @@ def _write_metadata(
     temporary.replace(install_dir / "install.json")
 
 
+def _sha256_file(path: Path | str) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _stage_application_binary(source: Path | str, install_dir: Path | str) -> tuple[Path, str]:
+    """Copy the application into a sibling staging file and verify it fully."""
+
+    source_path = Path(source)
+    root = Path(install_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    if not source_path.is_file() or source_path.stat().st_size <= 0:
+        raise BootstrapError("bundled AlinaCoder.exe is missing or empty")
+
+    staging = root / "AlinaCoder.exe.staging"
+    unlink_with_retry(staging, missing_ok=True)
+    expected = _sha256_file(source_path)
+    shutil.copy2(source_path, staging)
+    if not staging.is_file() or staging.stat().st_size <= 0:
+        raise BootstrapError("staged AlinaCoder.exe is missing or empty")
+    if _sha256_file(staging) != expected:
+        raise BootstrapError("staged AlinaCoder.exe failed SHA-256 verification")
+    return staging, expected
+
+
+def _prepare_application_backup(target: Path) -> Path | None:
+    """Persist the last known application binary before promotion."""
+
+    backup = target.with_name("AlinaCoder.exe.backup")
+    if backup.is_file():
+        return backup
+    if not target.is_file():
+        return None
+
+    temporary = target.with_name("AlinaCoder.exe.backup.tmp")
+    unlink_with_retry(temporary, missing_ok=True)
+    expected = _sha256_file(target)
+    shutil.copy2(target, temporary)
+    if not temporary.is_file() or temporary.stat().st_size <= 0 or _sha256_file(temporary) != expected:
+        unlink_with_retry(temporary, missing_ok=True)
+        raise BootstrapError("could not preserve the previous AlinaCoder.exe")
+    replace_with_retry(temporary, backup)
+    return backup
+
+
+def _restore_application_backup(target: Path, backup: Path | None) -> None:
+    """Restore the previous application or remove an uncommitted fresh install."""
+
+    if backup is not None and backup.is_file():
+        replace_with_retry(backup, target)
+        return
+    unlink_with_retry(target, missing_ok=True)
+
+
+def _promote_application_binary(staging: Path, target: Path, expected_sha256: str) -> Path | None:
+    """Atomically promote a verified stage, restoring the old target on failure."""
+
+    backup = _prepare_application_backup(target)
+    promoted = False
+    try:
+        replace_with_retry(staging, target)
+        promoted = True
+        if not target.is_file() or target.stat().st_size <= 0:
+            raise BootstrapError("promoted AlinaCoder.exe is missing or empty")
+        if _sha256_file(target) != expected_sha256:
+            raise BootstrapError("promoted AlinaCoder.exe failed SHA-256 verification")
+        return backup
+    except Exception:
+        if promoted:
+            _restore_application_backup(target, backup)
+        raise
+
+
+def _finalize_application_promotion(backup: Path | None) -> None:
+    if backup is not None:
+        unlink_with_retry(backup, missing_ok=True)
+
+
+def _commit_application_install(
+    install_dir: Path,
+    staging: Path,
+    expected_sha256: str,
+    *,
+    operation: str,
+    report: BootstrapReport | None = None,
+    deferred: bool = False,
+) -> Path:
+    """Commit application + metadata as one recoverable application transaction."""
+
+    target = install_dir / "AlinaCoder.exe"
+    backup = _promote_application_binary(staging, target, expected_sha256)
+    try:
+        _write_metadata(install_dir, operation=operation, report=report, deferred=deferred)
+    except Exception:
+        _restore_application_backup(target, backup)
+        raise
+    _finalize_application_promotion(backup)
+    return target
+
+
 def _normalize_bootstrap_state(
     report: BootstrapReport,
     initial_inventory: Any,
@@ -159,14 +264,24 @@ def install(
     install_dir = Path(install_dir)
     install_dir.mkdir(parents=True, exist_ok=True)
     source = Path(source_exe) if source_exe is not None else _bundled_exe()
-    target = install_dir / "AlinaCoder.exe"
-    shutil.copy2(source, target)
+    staging, expected_sha256 = _stage_application_binary(source, install_dir)
+
     if deferred_prerequisites:
-        _write_metadata(install_dir, operation=operation, deferred=True)
-        return target
+        return _commit_application_install(
+            install_dir,
+            staging,
+            expected_sha256,
+            operation=operation,
+            deferred=True,
+        )
     if bootstrapper is None:
-        _write_metadata(install_dir, operation=operation)
-        return target
+        return _commit_application_install(
+            install_dir,
+            staging,
+            expected_sha256,
+            operation=operation,
+        )
+
     adapter = getattr(bootstrapper, "adapter", None)
     detect = getattr(adapter, "detect_inventory", None)
     initial_inventory = detect() if callable(detect) else None
@@ -174,10 +289,16 @@ def install(
     previous_state = load_state() if callable(load_state) else None
     report = bootstrapper.run(online=online, model_override=model)
     report = _normalize_bootstrap_state(report, initial_inventory, previous_state, adapter)
-    _write_metadata(install_dir, operation=operation, report=report)
     if not report.ready:
+        _write_metadata(install_dir, operation=operation, report=report)
         raise BootstrapError("prerequisite bootstrap incomplete: " + ", ".join(report.blockers))
-    return target
+    return _commit_application_install(
+        install_dir,
+        staging,
+        expected_sha256,
+        operation=operation,
+        report=report,
+    )
 
 
 def repair(
@@ -251,11 +372,6 @@ def rollback(
 
     restored = rollback_managed(adapter, state)
     if not restored:
-        # Same-version upgrades intentionally produce no rollback target. Treat that
-        # as an idempotent no-op only when there is no evidence that an earlier
-        # version ever existed and the current bootstrap state is still healthy.
-        # Any partial previous provenance remains fail-closed rather than being
-        # misreported as a successful rollback.
         has_previous_hint = any(
             receipt.origin == "managed_by_alinacoder"
             and not name.startswith("model:")
@@ -355,8 +471,6 @@ def _write_failure_receipt_if_missing(args: argparse.Namespace, exc: BaseExcepti
     try:
         _write_metadata(install_dir, operation=_requested_operation(args), report=report)
     except OSError:
-        # Receipt persistence must not hide the original setup failure or turn it
-        # into a false success. The caller still returns the fail-closed exit code.
         pass
 
 
