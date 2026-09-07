@@ -30,4 +30,8 @@ from .windows_fs_hardening import harden_windows_filesystem
 
 harden_windows_filesystem()
 
+from .self_healing import bind_self_healing_installer
+
+bind_self_healing_installer()
+
 __all__ = ["NativeWindowsBootstrapAdapter", "ObservableWindowsBootstrapAdapter"]
