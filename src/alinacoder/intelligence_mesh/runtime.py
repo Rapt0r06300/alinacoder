@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from .experiential import ExperientialProvider
 from .fabric import InferenceFabric
 from .provider_atlas import ProviderDefinition, normative_provider_atlas
 from .providers import GeminiProvider, OllamaProvider, OpenAICompatibleProvider, ZeroCostProvider
@@ -15,6 +16,8 @@ class CredentialReader(Protocol):
 def _remote_provider(definition: ProviderDefinition, api_key: str) -> ZeroCostProvider | None:
     if definition.retired or not api_key:
         return None
+    if definition.provider_id == "experiential_gateway":
+        return ExperientialProvider(definition, api_key=api_key)
     if definition.protocol == "gemini":
         if not definition.base_url:
             return None
