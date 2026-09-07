@@ -3,1267 +3,526 @@
 Date: 2026-09-07
 Status: DESIGN — awaiting user review before implementation
 Repository: `Rapt0r06300/alinacoder`
-Baseline: `991bb4884296436046319e3aa7e5317ccb49674e`
+Baseline before design: `991bb4884296436046319e3aa7e5317ccb49674e`
 Branch policy: `main` only
 
-## 1. Purpose
+## 1. Mission
 
-This design upgrades AlinaCoder from a collection of capable subsystems into a coherent long-horizon coding agent whose conversational understanding, planning, memory, execution state, verification, model routing, quota management, and desktop observability reinforce one another.
+AlinaCoder must become a coherent long-horizon coding agent rather than a set of capable but loosely coupled subsystems. Conversation, goals, memory, planning, execution state, verification, model routing, quota control, learning and desktop observability must share explicit state and reinforce each other.
 
-The target is not to claim that AlinaCoder will always be correct or equivalent to a frontier commercial coding agent. The target is a system that is measurably more capable, robust, efficient, self-correcting, transparent, and resilient than the current implementation, while preserving strict zero-cost routing rules for remote inference when zero-cost mode is selected.
+Success means measurable gains in correctness, robustness, recovery, long-session coherence and efficiency. It does not mean claiming that the agent can never fail or that a local/free model is equivalent to a frontier paid model.
 
-The system MUST:
+Hard requirements:
 
-1. understand corrections, references, constraints, preferences, and evolving intent across long conversations;
-2. keep an explicit, current, machine-checkable execution state instead of inferring state only from chat history;
-3. couple planning and memory bidirectionally;
-4. select the strongest eligible model for the exact task, based on evidence rather than static names;
-5. use free remote capacity without violating provider terms, bypassing quotas, rotating identities, or deliberately evading rate limits;
-6. preserve local Ollama as the foundational no-API-billing fallback;
-7. spend scarce remote quota only where expected quality gain justifies it;
-8. detect uncertainty and use it as a control signal for inspect / experiment / verify / ask / escalate decisions;
-9. verify work from execution evidence, not model self-report;
-10. expose a concise operational trace in the desktop UI similar to modern coding agents without exposing hidden chain-of-thought.
+1. preserve corrections, references, constraints, preferences and evolving intent across long conversations;
+2. maintain an explicit machine-checkable execution state;
+3. couple planning and episodic memory bidirectionally;
+4. select the strongest eligible model for the exact task from measured evidence;
+5. exploit legitimate free inference while never evading provider quotas or enabling paid spillover;
+6. retain local Ollama as the foundational no-API-billing fallback;
+7. reserve scarce frontier quota for high-value reasoning rather than routine inspection;
+8. use uncertainty to control inspect / experiment / verify / escalate / ask decisions;
+9. ground completion in fresh execution evidence, never model self-report alone;
+10. expose a concise Codex-like operational trace without exposing hidden chain-of-thought.
 
-## 2. Non-goals and hard prohibitions
+## 2. Hard prohibitions
 
-The following are explicitly out of scope:
+AlinaCoder MUST NOT:
 
-- rotating IP addresses, proxies, accounts, identities, API keys, or organizations to bypass provider quotas or rate limits;
-- impersonating a new user/device to obtain additional free allocations;
-- automatic paid fallback when the user selected zero-cost mode;
-- silently enabling billing, auto-reload, credit purchase, or pay-as-you-go;
-- treating a model as free because of stale documentation or a past promotion;
-- treating provider/model names as a sufficient quality benchmark;
-- storing or displaying hidden model chain-of-thought;
-- allowing model confidence alone to authorize destructive or irreversible actions;
-- promoting unverified model-generated advice into durable project memory;
-- silently deleting previously learned user constraints or verified work when the conversation changes direction.
+- rotate IPs, proxies, accounts, identities, organizations, fingerprints or API keys to bypass rate limits or free quotas;
+- impersonate new users/devices to obtain more free allocation;
+- silently enable billing, auto-reload, credit purchase or pay-as-you-go;
+- use unknown or stale pricing as proof of zero cost;
+- treat a model/provider name as sufficient proof of quality or free status;
+- persist or display hidden chain-of-thought;
+- authorize destructive actions from model confidence alone;
+- promote unverified generated advice into durable project memory;
+- erase unrelated verified work when the user corrects one requirement.
 
-## 3. Existing foundations to preserve
+## 3. Existing foundations that must survive
 
-The implementation MUST extend rather than rebuild these current systems:
+This is an incremental migration, not a rewrite.
 
-### Conversation
+Preserve and extend:
 
-Current files:
+- `conversation/engine.py`, `advanced.py`, `models.py`, `voice.py`: RAW+MEANING, perspectives, anchors, targeted repairs, user-origin preferences, clarification cost, stable micro-turn mutation gate, context branches, failure replay;
+- `goal/engine.py`, `goal/models.py`: explicit objective/criteria, stale/verified evidence, pause/resume/cancel, replanning, proof-before-impossibility;
+- `memory/store.py`, `context.py`, `retrieval.py`, `planner.py`, `graph.py`, `skillbook.py`: project scoping, freshness, repository index, graph retrieval, bounded context, verified skill promotion, SQLite durability;
+- `intelligence_mesh/*`: zero-cost proof, fail-closed pricing, provider/model failover, hybrid local fallback, retired-provider tombstones;
+- `orchestration/core.py`: leases/fencing, semantic conflict detection, lineage-aware voting, value-gated council and multi-agent topology;
+- `desktop/*`: canonical simple chat/workbench and live activity surface;
+- installer/release self-healing and exact-artifact release gates.
 
-- `src/alinacoder/conversation/engine.py`
-- `src/alinacoder/conversation/advanced.py`
-- `src/alinacoder/conversation/models.py`
-- `src/alinacoder/conversation/voice.py`
-
-Existing valuable invariants to preserve:
-
-- RAW + MEANING turn preservation;
-- user/assistant perspective separation;
-- artifact anchors;
-- targeted correction without deleting unrelated verified work;
-- user-origin requirement for durable preferences;
-- clarification cost concept;
-- micro-turn stability and committed-user-turn mutation gate;
-- branchable conversational context;
-- failure replay.
-
-### Goals
-
-Current files:
-
-- `src/alinacoder/goal/engine.py`
-- `src/alinacoder/goal/models.py`
-
-Existing valuable invariants to preserve:
-
-- explicit objective and criteria;
-- verified/stale criterion state;
-- evidence-gated completion;
-- pause/resume/cancel;
-- strategy failure recording;
-- replanning after repeated failures;
-- proof required before declaring impossibility.
-
-### Memory
-
-Current files:
-
-- `src/alinacoder/memory/store.py`
-- `src/alinacoder/memory/context.py`
-- `src/alinacoder/memory/retrieval.py`
-- `src/alinacoder/memory/planner.py`
-- `src/alinacoder/memory/graph.py`
-- `src/alinacoder/memory/skillbook.py`
-
-Existing valuable invariants to preserve:
-
-- project-scoped memory;
-- source freshness;
-- repository index integration;
-- graph retrieval;
-- bounded context compilation;
-- verified-evidence requirement before experience becomes a skill;
-- SQLite WAL/FULL durability for SkillBook.
-
-### Intelligence mesh
-
-Current files:
-
-- `src/alinacoder/intelligence_mesh/provider_atlas.py`
-- `src/alinacoder/intelligence_mesh/providers.py`
-- `src/alinacoder/intelligence_mesh/fabric.py`
-- `src/alinacoder/intelligence_mesh/routing.py`
-- `src/alinacoder/intelligence_mesh/runtime.py`
-- `src/alinacoder/intelligence_mesh/qualification.py`
-
-Existing valuable invariants to preserve:
-
-- exact zero-cost proof;
-- no paid spillover;
-- fail-closed pricing;
-- route depletion after quota exhaustion;
-- provider/model failover;
-- hybrid remote-to-local fallback;
-- local-only and free-cloud isolation;
-- retired provider tombstones.
-
-### Orchestration
-
-Current file:
-
-- `src/alinacoder/orchestration/core.py`
-
-Existing valuable invariants to preserve:
-
-- lease/fencing semantics;
-- semantic conflict detection;
-- lineage-aware independent voting;
-- topology selection based on coupling;
-- council value gate;
-- diverse specialist selection;
-- disable multi-agent topology when it cannot prove terminal value.
-
-### Desktop and live activity
-
-Current files:
-
-- `src/alinacoder/desktop/app.py`
-- `src/alinacoder/desktop/workbench.py`
-- `src/alinacoder/desktop/activity.py`
-- `src/alinacoder/desktop/experience.py`
-
-These remain the canonical user surface.
-
-## 4. Target architecture
-
-The target architecture is a layered system:
+## 4. Canonical architecture
 
 ```text
 User / Voice / Desktop
         |
         v
-+-----------------------------+
-| Intent Compiler             |
-| - raw + meaning             |
-| - alternatives              |
-| - constraints               |
-| - references                |
-| - uncertainty               |
-+-----------------------------+
+Intent Compiler v2
         |
         v
-+=====================================================+
-| COGNITIVE KERNEL                                    |
-|                                                     |
-| Goal State <----> Plan State <----> Episodic Memory |
-|     |                |                 |             |
-|     +--------> Execution Ledger <------+             |
-|                      |                              |
-|                 Uncertainty                         |
-|                      |                              |
-|               Cognitive Controller                  |
-+=====================================================+
-        |
-        +------------------+
-        |                  |
-        v                  v
- Tool/Repo Runtime     Frontier Mesh
-        |              - capability profiler
-        |              - quota ledger
-        |              - dynamic router
-        |              - provider health
-        |              - council/escalation
-        |              - local fallback
-        |                  |
-        +--------+---------+
-                 v
-         Verification Kernel
-                 |
-                 v
-       Evidence / Skill Learning
-                 |
-                 v
-         Desktop Activity Trace
++====================================================+
+| COGNITIVE KERNEL                                   |
+| Goal <-> Plan <-> Episodic Memory                  |
+|   \       |       /                                |
+|       Execution Ledger                             |
+|              |                                     |
+|      Uncertainty Controller                        |
++====================================================+
+        |                         |
+        v                         v
+Tool/Repo Runtime          Zero-Cost Frontier Mesh
+        |                  profiles / quota / health
+        +-------------+-----------+
+                      v
+              Verification Kernel
+                      |
+                      v
+           Evidence + Skill Learning
+                      |
+                      v
+             Desktop Activity Trace
 ```
 
-No layer may infer success solely from assistant text.
+No component may turn assistant prose into proof of success.
 
-## 5. Cognitive Kernel
+## 5. Cognitive state and Intent Compiler v2
 
-### 5.1 Canonical cognitive state
+Add a persisted, event-reconstructible `CognitiveState` containing operational facts only:
 
-Add a canonical `CognitiveState` persisted through the existing state store. It MUST be reconstructible from events and MUST include identifiers/versioning rather than opaque serialized model thoughts.
+- session/state version;
+- active goal;
+- intent and plan revisions;
+- phase/subtask;
+- active requirements, constraints and prohibitions;
+- open questions and structured uncertainty;
+- selected artifacts;
+- verified/stale facts;
+- recent failures;
+- execution-ledger and memory snapshot versions;
+- current model route;
+- last verified repository state.
 
-Proposed fields:
+Each committed user turn produces a versioned `IntentEnvelope` with:
 
-- `session_id`
-- `state_version`
-- `active_goal_id`
-- `intent_revision`
-- `plan_revision`
-- `current_phase`
-- `current_subtask_id`
-- `active_requirements`
-- `active_constraints`
-- `prohibitions`
-- `open_questions`
-- `uncertainties`
-- `selected_artifacts`
-- `verified_facts`
-- `stale_facts`
-- `recent_failures`
-- `execution_ledger_version`
-- `memory_snapshot_version`
-- `current_model_route`
-- `last_verified_repo_state`
-
-The state MUST contain operational facts and contracts only. It MUST NOT persist private hidden chain-of-thought.
-
-### 5.2 Intent Compiler v2
-
-The current conversation engine stores a single normalized meaning. Extend it so each committed user turn can produce a versioned `IntentEnvelope`:
-
-- raw input;
-- normalized meaning;
-- primary intent;
-- plausible alternatives;
-- referenced artifacts/entities;
-- requirements added;
-- requirements changed;
-- requirements cancelled;
-- constraints;
-- prohibitions;
-- desired output/result;
-- urgency / explicit continuation intent;
-- confidence per interpretation;
+- raw input and normalized meaning;
+- primary intent and plausible alternatives;
+- references/entities;
+- requirements added/changed/cancelled;
+- constraints and prohibitions;
+- desired result;
+- continuation/priority signals;
+- confidence class/provenance;
 - uncertainty causes;
 - source turn IDs.
 
-The deterministic engine remains authoritative over stored state. LLM interpretation is only a proposal until validated against context and repair rules.
+LLM parsing proposes an envelope; deterministic conversation/context rules remain authoritative.
 
-### 5.3 Causal correction propagation
+### Causal correction
 
-Current targeted correction preserves unrelated work. Extend this with a dependency graph:
+Add a dependency graph from intent assumptions to plan nodes, memory hits, observations, tool results and verification evidence. A correction stales dependent descendants only. Independent verified evidence remains valid.
 
-- intent assumptions;
-- plan steps;
-- retrieved memories;
-- observations;
-- tool results;
-- verification evidence.
+Example: changing “installer” to “model bridge” invalidates installer-specific hypotheses and plan nodes, but a still-current provider-atlas read can remain valid.
 
-When the user corrects one assumption, all descendants depending on that assumption become stale. Independent verified evidence remains valid.
+## 6. Clarification and uncertainty control
 
-Example:
-
-- User: “repair the installer”
-- Agent inspects Windows installer.
-- User: “no, I mean the model bridge.”
-- Installer-specific hypotheses and plan nodes become stale.
-- Unrelated repository index and provider-atlas reads remain usable if their source state is unchanged.
-
-This MUST be deterministic and testable.
-
-### 5.4 Clarification by expected information gain
-
-Replace the scalar-only clarification rule with a policy that considers:
-
-- probability of ambiguity;
-- cost of wrong action;
-- reversibility;
-- information expected from one clarifying question;
-- ability to resolve ambiguity through safe read-only inspection;
-- question cost / interruption cost.
+Replace fixed-threshold questioning with expected-information-gain control.
 
 Decision order:
 
-1. if safe inspection can resolve ambiguity cheaply, inspect;
-2. if a reversible sandbox experiment can resolve it safely, experiment;
-3. if uncertainty remains and wrong-action cost is low, choose the best-supported interpretation and expose the assumption;
-4. if uncertainty remains and wrong-action cost is high, ask one highest-information-gain question.
-
-AlinaCoder MUST avoid asking questions merely because confidence is below a fixed threshold.
-
-### 5.5 Uncertainty as a control signal
+1. resolve ambiguity by cheap safe inspection when possible;
+2. use a reversible sandbox probe if it resolves uncertainty safely;
+3. for low-cost reversible ambiguity, act on the best-supported interpretation while exposing the assumption;
+4. for high-cost ambiguity, ask the single question expected to reduce the most decision uncertainty;
+5. block when required evidence cannot be obtained safely.
 
-Add structured uncertainty dimensions:
+Track uncertainty dimensions separately: intent, repository state, factual, route/model, verification, tool effect and environment.
 
-- intent uncertainty;
-- repository-state uncertainty;
-- factual uncertainty;
-- model-route uncertainty;
-- verification uncertainty;
-- tool-effect uncertainty;
-- environment uncertainty.
+Controller outputs: `ACT`, `INSPECT`, `SANDBOX_PROBE`, `VERIFY`, `ESCALATE_MODEL`, `CALL_COUNCIL`, `ASK_USER`, `BLOCK`.
 
-Map uncertainty + action criticality into policies:
+Numeric confidence may be used only when calibrated from observed outcomes. Otherwise use LOW/MEDIUM/HIGH plus provenance.
 
-- `ACT`
-- `INSPECT`
-- `SANDBOX_PROBE`
-- `VERIFY`
-- `ESCALATE_MODEL`
-- `CALL_COUNCIL`
-- `ASK_USER`
-- `BLOCK`
+## 7. Hierarchical planning + bidirectional memory
 
-Confidence MUST NOT be displayed as fake precision. Internally it may be numeric if calibrated from observed outcomes; otherwise use bounded classes such as LOW/MEDIUM/HIGH with provenance.
+Represent active work as a versioned plan graph, not only strings. Node fields include phase, subtask, dependencies, required evidence, completion predicate, affected files/symbols, expected tools, status, attempts, failure reasons and memory-query intent.
 
-## 6. Plan–Memory coupling
+Default software-repair phases: understand, reproduce/baseline, localize, hypothesize, implement, verify, adversarial review, release/commit. Trivial tasks may collapse phases.
 
-### 6.1 Hierarchical planning
+Memory retrieval is conditioned on goal, phase, subtask, blast radius, relevant prior failures, user constraints and current repository state. Fixed source constants must not be the sole ranking method.
 
-Replace flat plan strings as the only active representation with a versioned plan graph:
+Ranking combines lexical relevance, graph relationship, phase relevance, freshness, source authority, evidence validity, diversity/MMR, known-failure relevance and context cost.
 
-- phase;
-- subtask;
-- dependencies;
-- required evidence;
-- completion predicate;
-- affected files/symbols;
-- expected tools;
-- status;
-- attempts;
-- failure reasons;
-- memory query intent.
+Memory/failure evidence triggers targeted replanning when the agent repeats failed strategies, re-runs unchanged actions without new information, keeps failing reproduction, discovers invalidating constraints, contradicts its hypothesis or materially changes blast radius.
 
-Recommended phases for software repair:
+Completed independent plan nodes survive targeted replan.
 
-1. understand;
-2. reproduce / establish baseline;
-3. localize;
-4. hypothesize;
-5. implement;
-6. verify;
-7. adversarial review;
-8. release/commit.
+## 8. Deterministic Execution Ledger
 
-Phases are guidance, not rigid mandatory steps. Trivial tasks may collapse phases.
+Canonical path: `src/alinacoder/runtime/ledger.py`.
 
-### 6.2 Plan-guided memory retrieval
+The ledger contains no LLM-generated reasoning and requires zero additional model calls.
 
-Memory retrieval MUST be conditioned on:
+### Observations
 
-- active goal;
-- current phase;
-- current subtask;
-- files/symbols in the blast radius;
-- prior failures relevant to this subtask;
-- explicit user constraints;
-- current repository state version.
+Store observation ID, repository state/version, path/query/range/symbol, content/result digest, order, validity and invalidation cause.
 
-Static source weights such as fixed `0.55` / `0.65` MUST not be the sole ranking mechanism.
+### Modifications
 
-Use a budgeted ranking combining:
+Store mutated paths, before/after digests, originating tool/agent, state version and affected symbols when known. Relevant reads become stale after mutation unless exact validity can be proven.
 
-- lexical relevance;
-- graph relationship;
-- phase relevance;
-- recency/freshness;
-- source authority;
-- evidence validity;
-- diversity / maximal marginal relevance;
-- known failure relevance;
-- cost to include.
+### Commands/tool calls
 
-### 6.3 Memory-driven replanning
+Store normalized invocation, arguments, repository state, effect class, result/exit digest, duration, reuse eligibility and failure class.
 
-Memory statistics MUST inform plan control. Replan when evidence shows:
+### Inform boundary
 
-- repeated failed strategy;
-- same command/edit pattern repeating without new information;
-- issue reproduction still failing after changes;
-- key observation becoming stale;
-- newly discovered constraint invalidating a planned step;
-- verification contradicting the active hypothesis;
-- expected blast radius materially changing.
+Before the model acts, inject a compact view of valid observations, changes, failing tests, last verification point, repeated failures and open unknowns.
 
-The planner MUST be able to preserve completed independent nodes while replacing only affected descendants.
+### Govern boundary
 
-## 7. Execution Ledger
+- exact repeated read-only work under unchanged relevant state may reuse the cached result;
+- repeated tests under unchanged code produce a nudge, not a hard prohibition;
+- a known-failed mutation strategy without new evidence triggers replanning;
+- destructive effects remain subject to existing security/approval gates.
 
-Add `src/alinacoder/runtime/ledger.py` (final exact path may be adjusted during implementation plan, but the responsibility boundary is mandatory).
+## 9. Adaptive context management
 
-The ledger is deterministic and contains mechanically derived execution facts.
+Use three tiers:
 
-### 7.1 Observation records
+1. stable anchors: goal, active user constraints, prohibitions and definitions;
+2. working memory: current phase/subtask, fresh key observations, diff/test state;
+3. lossless history: complete event/tool/interaction log outside prompt context.
 
-For every file/search/read observation record:
+At phase boundaries, proactive folding may replace verbose trajectory material in working context with an actionable summary containing decision, evidence, files/symbols, rejected hypotheses, unresolved questions, verification state and source event IDs. The underlying lossless log is never deleted.
 
-- observation ID;
-- repository state/version;
-- path;
-- range/symbol/query;
-- content digest or result digest;
-- timestamp/order;
-- validity status;
-- invalidation cause.
+Expose programmatic history search by text, event type, file/path, failure, model/provider and step/time range, plus structured export usable by Python tooling.
 
-### 7.2 Modification state
+Mandatory constraints and verification evidence may never be silently truncated. If they do not fit, route to an eligible larger-context model or fail explicitly.
 
-Record:
+## 10. Zero-Cost Frontier Mesh
 
-- mutated paths;
-- before/after digests;
-- originating tool/agent;
-- commit/worktree/state version;
-- semantic affected symbols if known.
+Routing pipeline:
 
-A previous read of an affected file becomes stale after mutation unless the exact observed span is proven unchanged.
+`Discover -> prove zero cost -> health -> capability profile -> quota -> context fit -> conservative quality -> latency/quota value -> route -> observe outcome -> update profile`.
 
-### 7.3 Command records
+Support authenticated free providers, documented anonymous free providers, aggregator free routers, exact free model routes and local no-API-billing routes.
 
-Record:
+### Kilo anonymous bridge
 
-- normalized command/tool call;
-- arguments;
-- repo state version;
-- effect class;
-- exit/result digest;
-- duration;
-- whether still reusable;
-- failure classification.
+Current Kilo documentation states that free `:free` models may be used anonymously and that free traffic is limited by IP. Implement a zero-configuration anonymous Kilo route only while current provider evidence still proves this behavior.
 
-### 7.4 Inform path
-
-Before each model decision, provide a compact ledger summary:
-
-- what has been inspected and remains valid;
-- what changed;
-- current failing tests;
-- last verification point;
-- repeated failures to avoid;
-- pending unknowns.
-
-### 7.5 Govern path
-
-Before execution:
-
-- exact repeat of a read-only command under unchanged relevant state may reuse prior result;
-- repeated test under unchanged state should be nudged, not blindly blocked;
-- repeated known-failed mutation strategy without new evidence should trigger replanning;
-- destructive actions remain governed by existing approval/security policies.
-
-This layer MUST require zero additional LLM calls.
-
-## 8. Adaptive context management
-
-### 8.1 Three-tier context workspace
-
-Use:
-
-1. **stable anchors** — goal, user constraints, prohibitions, current definitions;
-2. **working memory** — current phase, active subtask, key fresh observations, current diff/test state;
-3. **lossless history store** — complete event/tool/interaction log outside prompt context.
-
-### 8.2 Proactive context folding
-
-At meaningful phase boundaries, completed trajectories may be folded into an actionable summary containing:
-
-- decision made;
-- evidence supporting it;
-- files/symbols involved;
-- rejected hypotheses;
-- unresolved questions;
-- verification state;
-- source/event IDs for reconstruction.
-
-Folding MUST NOT delete the lossless underlying log.
-
-### 8.3 Programmatic history access
-
-Expose search/filter tools over the lossless trajectory/ledger so the agent can recover detail without restoring the entire chat into the prompt.
-
-At minimum:
-
-- text search;
-- event type filter;
-- file/path filter;
-- failure filter;
-- model/provider filter;
-- time/step range;
-- Python-accessible structured export when available.
-
-### 8.4 Context budget controller
-
-The controller chooses what to include based on:
-
-- task complexity;
-- model context window;
-- phase;
-- mandatory anchors;
-- information value;
-- expected token cost.
-
-Mandatory constraints and verified evidence MUST never be silently dropped. If they exceed budget, route to a larger-context eligible model or explicitly fail closed rather than truncating critical constraints.
-
-## 9. Zero-Cost Frontier Mesh
-
-## 9.1 Routing principle
-
-AlinaCoder MUST select the strongest eligible route for the current capability requirement, not the most famous model and not the provider that appears first.
-
-Selection pipeline:
-
-```text
-Discover -> Prove zero cost -> Health check -> Capability profile
--> Quota check -> Context-fit check -> Quality LCB -> Latency/quota value
--> Route -> Observe outcome -> Update profile
-```
-
-### 9.2 Provider classes
-
-Maintain current provider-atlas safety classes. Add explicit runtime capability for:
-
-- authenticated zero-cost provider;
-- anonymous zero-cost provider when provider documentation permits it;
-- aggregator free router;
-- exact free model route;
-- local no-API-billing route.
-
-### 9.3 Kilo anonymous bridge
-
-Kilo currently documents anonymous access to free models with a rate limit per IP. AlinaCoder MAY use this as a zero-configuration source only when current provider evidence confirms anonymous free access.
-
-Required behavior:
+Rules:
 
 - no fake authentication;
-- no IP rotation or quota evasion;
-- obey 429 and Retry-After/reset signals;
-- anonymous route kept separate from authenticated Kilo route;
-- exact current pricing/discovery checked before dispatch;
-- when the allowance is exhausted, route elsewhere rather than retry-spam.
+- no IP/quota evasion;
+- obey 429 and reset/cooldown;
+- anonymous and authenticated Kilo routes are distinct;
+- pricing/discovery is requalified before dispatch;
+- exhaustion immediately routes elsewhere;
+- explicit profiled free models outrank `kilo-auto/free` when AlinaCoder has stronger task-fit evidence; `kilo-auto/free` remains a useful fallback.
 
-`kilo-auto/free` MAY be an eligible fallback router, but explicit individually profiled free models SHOULD outrank it when AlinaCoder has stronger evidence about task fit.
+### OpenRouter
 
-### 9.4 OpenRouter free routes
+Discover exact free models and profile them independently. Use provider generic free routing as fallback only when zero cost is proven and paid fallback is impossible.
 
-Discover exact free models and profile them independently. Use provider-side generic free router only when:
+### Groq and other hard-stop free tiers
 
-- exact free routes are unavailable or inferior;
-- the router itself is currently free;
-- provider-side paid fallback is impossible;
-- returned model identity can be recorded where available.
+Use only after the account/plan proves no paid spillover. Consume reset/remaining headers into the quota ledger when available.
 
-### 9.5 Groq and other hard-stop free quotas
+### DeepSeek
 
-Use only after account/plan qualification proves no paid spillover. Read remaining quota/reset headers where available and update the quota ledger.
+The official DeepSeek API is treated as paid unless current authoritative evidence explicitly proves otherwise. DeepSeek-family routes are allowed only through a currently proven zero-price third-party route or local execution. The name “DeepSeek” never implies “free.”
 
-### 9.6 DeepSeek
+### Local model ladder
 
-Official DeepSeek API pricing MUST be treated as paid unless live authoritative evidence says otherwise.
+Benchmark machine resources and maintain, when hardware allows:
 
-AlinaCoder MAY use DeepSeek model families when:
+- strongest stable local coding model;
+- fast local utility model;
+- CPU-safe fallback.
 
-- a third-party provider exposes an exact zero-price route that passes current qualification; or
-- the model is running locally under the local no-API-billing policy.
+Measure memory fit/headroom, context capacity, prompt/generation throughput, simple code repair, tool following and repeated-inference stability. No model name is permanently hardcoded as “best.”
 
-The name `DeepSeek` MUST never imply free status.
+## 11. Measured model capability profiles
 
-### 9.7 Local model ladder
+Add `ModelCapabilityProfile` dimensions for code generation, debugging, repository reasoning, architecture, tool-use reliability, instruction following, long-context stability, conversational repair, summarization, speed, failure rate, context window, freshness and sample count.
 
-Installer/runtime should benchmark available machine resources and maintain at least:
+Evidence order:
 
-- a **strong local coding model** selected for the machine;
-- a **fast local utility model** for cheap classification/summarization/simple tasks, if resources allow;
-- a safe CPU-capable fallback when GPU models cannot fit.
+1. current AlinaCoder outcome observations;
+2. AlinaCoder microbenchmarks;
+3. provider metadata;
+4. versioned seed priors.
 
-Candidate families are discovered dynamically and versioned; no model name is permanently hardcoded as “best.”
+Fresh measured evidence dominates stale priors.
 
-Local qualification should measure:
+### Conservative quality score — fixed design
 
-- memory fit/headroom;
-- context capacity;
-- prompt throughput;
-- generation throughput;
-- simple code-repair score;
-- tool-following score;
-- stability under repeated inference.
+For each task capability, benchmark outcomes are stored as success/failure trials. The route’s primary `quality_lcb` is the **95% Wilson score lower bound** for that capability.
 
-### 9.8 Capability profiler
+- before 5 measured trials, use a versioned seed prior but apply a cold-start penalty so an unmeasured model cannot outrank a strongly proven model solely from a name/prior;
+- at 5+ trials, Wilson LCB is the primary observed success score;
+- graded secondary signals may break ties but cannot override failure of a mandatory capability requirement;
+- profiles expire/revalidate when model ID/version, provider behavior or benchmark version changes.
 
-Add a `ModelCapabilityProfile` with dimensions such as:
+This removes the current “all discovered models default to 0.5” weakness from production routing.
 
-- code generation;
-- debugging;
-- repository reasoning;
-- architecture/design;
-- tool-use reliability;
-- instruction following;
-- long-context stability;
-- conversational repair;
-- summarization;
-- speed;
-- measured failure rate;
-- context window;
-- freshness timestamp;
-- sample count;
-- confidence/lower bound.
+## 12. Task-aware routing and quota ledger
 
-Profiles may combine:
+Classify inference calls into capability classes such as conversation, intent resolution, planning, repository search, architecture, code generation, debugging, review, verification analysis, summarization and research synthesis. Use deterministic classification first and model escalation only when necessary.
 
-1. provider metadata;
-2. known static seed priors;
-3. AlinaCoder microbenchmarks;
-4. task outcome observations.
+Persist a `QuotaLedger` containing known RPM/RPD/TPM/TPD, remaining requests/tokens, reset timestamps, 429/402/403/5xx history, cooldown, latency, success/failure counts, discovery time and cost-proof expiry.
 
-Observed evidence MUST dominate stale priors over time.
-
-### 9.9 Quality lower confidence bound
-
-Routing should use a conservative score rather than raw average.
-
-Example conceptual form:
-
-`quality_lcb = mean_quality - uncertainty_penalty`
-
-The exact estimator will be fixed in the implementation plan and tests. A model with one lucky success MUST not immediately outrank a repeatedly proven model.
-
-### 9.10 Task-aware capability requirements
-
-Classify each inference call, e.g.:
-
-- `conversation`
-- `intent_resolution`
-- `planning`
-- `repository_search`
-- `architecture`
-- `code_generation`
-- `debugging`
-- `review`
-- `verification_analysis`
-- `summarization`
-- `research_synthesis`
-
-The classifier itself should preferably be deterministic/cheap first, with LLM escalation only when needed.
-
-### 9.11 Quota Ledger
-
-Persist provider/model quota state:
-
-- last known RPM/RPD/TPM/TPD limits if provided;
-- remaining requests/tokens;
-- reset timestamps;
-- recent 429/402/403/5xx events;
-- cooldown deadline;
-- average latency;
-- successful calls;
-- failed calls;
-- last discovery timestamp;
-- cost proof expiry.
-
-The ledger MUST distinguish:
-
-- depleted until reset;
-- temporarily unhealthy;
-- authentication failure;
-- billing blocked;
-- retired;
-- unknown.
-
-### 9.12 Quota-aware reservation
-
-Scarce high-quality free capacity MAY be reserved for higher-value phases.
-
-Examples:
-
-- local model performs repository indexing;
-- cheap remote model summarizes logs;
-- strongest free frontier model reviews the architecture or resolves a hard debugger fork;
-- independent second lineage reviews a high-criticality patch.
-
-Reservation is advisory and evidence-based; it MUST NOT block progress when a strong route is genuinely necessary.
-
-### 9.13 Retry and failover
-
-Do not repeatedly hit a route known to be exhausted.
+States: AVAILABLE, DEPLETED_UNTIL_RESET, TEMP_UNHEALTHY, AUTH_BLOCKED, BILLING_BLOCKED, RETIRED, UNKNOWN.
 
 Error policy:
 
-- 429 -> record reset/cooldown; route elsewhere;
-- 402 -> hard block route;
+- 429 -> record reset/cooldown and route elsewhere;
+- 402 -> hard block;
 - 401/403 -> disable until credentials/account state changes;
-- 5xx/network -> bounded retry/circuit breaker;
-- malformed response -> penalize health and try another route;
-- semantic failure -> do not blindly retry same prompt/model; change strategy or model lineage.
+- 5xx/network -> bounded retry + circuit breaker;
+- malformed response -> health penalty/failover;
+- semantic failure -> do not blindly retry identical strategy/prompt/model lineage.
 
-## 10. Multi-model cognition
+Scarce high-quality free calls may be reserved for architecture, hard debugging, adversarial review and release-critical decisions while local/cheaper routes perform routine indexing and summarization.
 
-### 10.1 Primary + critic pattern
+## 13. Multi-model cognition
 
-For hard/critical work:
+For difficult/high-criticality work use primary + independent critic:
 
-1. primary model proposes hypothesis/patch/plan;
-2. independent critic receives task contract + evidence + proposed result, not the primary hidden reasoning;
-3. critic returns defects, missing tests, contradictions, or PASS/INCONCLUSIVE;
-4. verification kernel remains final authority.
+1. primary proposes plan/hypothesis/patch;
+2. critic from an independent lineage receives task contract, evidence and proposed result — never private hidden reasoning;
+3. critic returns defects, missing tests, contradictions or PASS/INCONCLUSIVE;
+4. deterministic verification remains final authority.
 
-### 10.2 Lineage diversity
+Existing lineage-aware aggregation stays mandatory. Same underlying model served by multiple providers counts as one cognitive lineage.
 
-Existing lineage-aware vote aggregation remains mandatory. Multiple routes serving the same underlying model family do not count as independent cognitive votes.
+Council is value-gated using criticality, uncertainty, disagreement, repeated failures, blast radius, latency and quota cost. Simple work stays single-model/local.
 
-### 10.3 Council activation
+## 14. Verification Kernel
 
-Council runs only if expected terminal value exceeds latency/quota/resource cost. Signals include:
+A plan node or goal criterion completes only from fresh evidence bound to the relevant repository state.
 
-- high criticality;
-- high uncertainty;
-- disagreement between evidence and current hypothesis;
-- repeated failures;
-- large blast radius;
-- release-gate work;
-- security-sensitive changes.
+Evidence includes test invocation/result, fail-before/pass-after reproduction, compilation/static analysis, independent verifier output, artifact hashes/provenance and packaged smoke tests.
 
-Trivial interactions remain single-model/local.
+When a bug is reproducible, reproduction becomes a first-class gate. A patch cannot be “fixed” while the latest valid reproduction still fails.
 
-## 11. Verification Kernel
+Any edit affecting a proven surface stales dependent evidence until rerun. Stale green tests cannot certify later state.
 
-### 11.1 Execution-grounded completion
+High-criticality release/installer/security work should combine independent review with deterministic proof.
 
-A plan node or goal criterion can be complete only from fresh evidence bound to the relevant repository state.
+## 15. Verified learning and negative memory
 
-Evidence examples:
+Extend `SkillBook` experience cards with problem signature, scope, strategy, preconditions, failed alternatives, evidence IDs, state/commit binding, revalidation policy and outcome statistics.
 
-- test invocation + exit status + state digest;
-- issue reproduction fail-before/pass-after;
-- compilation result;
-- static check result;
-- independent verifier result;
-- file/hash/provenance receipt;
-- release artifact smoke test.
+Promotion requires verified outcome, evidence, project scoping and no conflict with protected governance. Human acceptance is a strong signal but executable proof remains required when available.
 
-### 11.2 Reproduction gates
+Store failed strategies with the conditions under which they failed. They prevent loops but are not permanent prohibitions; changed state/new evidence can reopen them.
 
-When a bug is reproducible, its reproduction MUST be a first-class completion gate. A code change cannot be called fixed while the latest valid reproduction result still fails.
+Track learned-skill outcomes. Poor skills are quarantined, never silently deleted.
 
-### 11.3 Evidence invalidation
+## 16. Conversation robustness campaign
 
-Any edit affecting the proven surface invalidates dependent evidence until rerun. No stale green test may certify a later state.
+Build a deterministic/model-assisted replay corpus covering corrections, pronouns/artifact anchors, multiple-selection ambiguity, continue-after-restart, “do the same,” negation, scope/priority changes, voice interruption, partial ASR, noisy French, mixed French/English technical language, stale references, old commit vs current state, messages arriving during long work, subtask stop vs full stop, undo, 100+ turn constraint retention, false-memory rejection and causal invalidation.
 
-### 11.4 Independent final audit
+Milestones:
 
-High-criticality release/installer/security changes should require a separate verifier context or lineage where practical, plus deterministic execution proof.
+- first implementation stage: hundreds of generated variations;
+- release target: at least 1,000 retained replay cases;
+- every discovered real failure becomes a regression fixture when safely reproducible.
 
-## 12. Learning and self-improvement
+## 17. Desktop — simple chat, rich operational trace
 
-### 12.1 Experience cards
+Chat remains primary. Add compact operational surfaces for:
 
-Extend existing `SkillBook` experience model. A candidate experience should include:
+- active goal;
+- current phase;
+- next action;
+- blocker;
+- verification state;
+- selected provider/model.
 
-- problem signature;
-- repository/project scope;
-- strategy;
-- preconditions;
-- failed alternatives if useful;
-- verification evidence IDs;
-- commit/state binding;
-- expiry/revalidation policy;
-- confidence/sample count.
+Live activity shows structured events: interpretation/assumption update, plan/replan, repository search/read, test, patch, verify, route selection, quota failover, critic/council, recovery, evidence pass/fail, commit/release.
 
-### 12.2 Promotion gate
+For each inference call expose provider, model, task class, zero-cost proof state and concise route reason such as “best verified debugging LCB among available zero-cost routes.” Never expose credentials, auth headers or hidden chain-of-thought.
 
-Durable experience is promoted only when:
+## 18. Performance strategy
 
-- outcome is verified;
-- evidence is available;
-- it does not conflict with protected governance rules;
-- it is project-scoped unless explicitly generalizable;
-- repeated failures are not mislearned as success.
+Deterministic fast paths handle exact state lookup, known paths, ledger reuse, hashes, quota checks and basic routing without model calls.
 
-Human acceptance/commit is a strong signal but does not replace executable verification when executable proof is available.
+Preferred expensive-call flow:
 
-### 12.3 Negative memory
-
-Record known failed strategies, including conditions under which they failed, to prevent loops.
-
-A failed strategy is not a permanent prohibition. New evidence or changed state can reopen it.
-
-### 12.4 Skill quality tracking
-
-Skill usage outcomes should update reliability statistics. Low-performing learned skills become quarantined rather than silently deleted.
-
-## 13. Conversation robustness campaign
-
-Create a large deterministic conversation replay suite covering at least these families:
-
-1. correction after several turns;
-2. reference pronouns to selected files/diffs/tests;
-3. multiple selected artifacts ambiguity;
-4. “continue” after restart;
-5. “do the same for X”;
-6. negation (“not X, Y”);
-7. constraint tightening mid-task;
-8. constraint removal;
-9. scope expansion;
-10. scope narrowing;
-11. priority reorder;
-12. interruption while assistant is speaking;
-13. partial ASR not authorizing mutation;
-14. noisy French technical vocabulary;
-15. English/French mixed technical input;
-16. typo correction;
-17. user contradicts assistant assumption;
-18. assistant uncertainty without user contradiction;
-19. stale artifact reference after file deletion/rename;
-20. user references old commit vs current worktree;
-21. new message arrives during long run;
-22. “stop only this subtask” vs stop whole run;
-23. “undo that last change”;
-24. user changes desired output format without changing goal;
-25. long 100+ turn conversation retaining active constraints;
-26. false memory candidate rejected;
-27. unrelated verified work preserved after correction;
-28. correction invalidates dependent plan only;
-29. ambiguous destructive request asks/blocks;
-30. safe read-only ambiguity resolves by inspection.
-
-The first milestone should include hundreds of generated variations. The release gate target is a stable corpus of at least 1,000 replay cases across deterministic and model-assisted interpretation scenarios, with failures retained as regression fixtures.
-
-## 14. Desktop UX — Codex-like operational trace
-
-The desktop stays simple: chat is primary.
-
-### 14.1 Main surface
-
-- conversation stream;
-- input/voice controls;
-- active project/repository;
-- compact current status.
-
-### 14.2 Live activity surface
-
-Show structured operational events, not hidden chain-of-thought:
-
-- understanding / assumption changed;
-- plan created/revised;
-- searching repository;
-- reading file;
-- running test;
-- applying patch;
-- verifying;
-- model route selected;
-- provider changed due to quota/health;
-- critic invoked;
-- retry/recovery;
-- evidence passed/failed;
-- commit/release event.
-
-### 14.3 Model route explanation
-
-For each inference call expose concise facts:
-
-- provider;
-- model;
-- task class;
-- zero-cost proof state;
-- why selected, e.g. “best verified debugging score among available free routes”;
-- fallback reason when route changes.
-
-Do not expose secret keys, billing identifiers, raw authorization headers, private hidden reasoning, or unnecessarily verbose provider internals.
-
-### 14.4 Cognitive status card
-
-Optional compact card:
-
-- Goal
-- Current phase
-- Next action
-- Open blocker
-- Verification state
-- Model
-
-The user must be able to understand what AlinaCoder is doing without reading logs.
-
-## 15. Performance and efficiency
-
-### 15.1 Fast-path policy
-
-Simple deterministic tasks MUST avoid expensive inference.
-
-Examples:
-
-- exact state lookup;
-- known file path resolution;
-- repeated read reuse;
-- hash checks;
-- quota/reset checks;
-- basic routing classification;
-- formatting known structured state.
-
-### 15.2 Remote frontier call minimization
-
-A strong remote call should receive precompiled high-value context rather than raw repository/history dumps.
-
-Preferred pattern:
-
-1. deterministic/local inspect;
-2. local/cheap summarize if needed;
-3. frontier reason/code/review;
-4. deterministic execute;
-5. deterministic verify;
+1. deterministic/local inspection;
+2. local/cheap context preparation;
+3. frontier reasoning/code/review only when valuable;
+4. deterministic execution;
+5. deterministic verification;
 6. frontier revisit only if evidence fails or uncertainty remains.
 
-### 15.3 Cache correctness
+All caches are state-bound and invalidated by relevant repository changes.
 
-Caching is allowed only with explicit state binding and invalidation. No cache hit may survive a relevant repository state change without proof that the cached observation remains valid.
+## 19. Reliability and recovery
 
-## 16. Reliability and failure containment
+Use per-route circuit breakers with CLOSED / OPEN / HALF_OPEN states.
 
-### 16.1 Circuit breakers
+Cognitive state, quota ledger, execution ledger, plan, memory and goal state survive restart without treating interrupted work as complete. Critical writes use existing atomic/event-sourced persistence patterns.
 
-Per provider/model/tool:
+Every retry is bounded or waiting for a documented state/reset change. Repeating the same failed action with unchanged evidence is a defect and triggers replan.
 
-- closed -> normal;
-- open -> unavailable until deadline/change;
-- half-open -> limited probe.
+## 20. Evaluation and A/B gates
 
-### 16.2 State recovery
+Track:
 
-Cognitive state, quota ledger, execution ledger, plan and goal state MUST survive application restart without treating incomplete work as complete.
-
-### 16.3 Crash safety
-
-Use existing atomic/event-sourced persistence patterns. Critical state updates must be atomic or reconstructible.
-
-### 16.4 No infinite loops
-
-Every retry family MUST be bounded or governed by new evidence/reset time. Repeating the same failed action without changed state/evidence is a defect.
-
-## 17. Security and provider compliance
-
-### 17.1 Credential isolation
-
-Keep provider credentials in the existing protected vault. Activity logs expose only provider IDs and non-secret route metadata.
-
-### 17.2 Zero-cost invariant
-
-In zero-cost modes:
-
-- unknown price = blocked;
-- non-zero price = blocked;
-- expired proof = blocked/requalified;
-- possible paid spillover without hard stop = blocked;
-- provider-side paid fallback = blocked;
-- automatic credit purchase = prohibited.
-
-### 17.3 Quota compliance
-
-Quota exhaustion is a routing event, not an invitation to evade limits.
-
-AlinaCoder MUST NOT automatically rotate IPs, accounts, identities, API keys, organizations, fingerprints, or proxies to regain free quota.
-
-## 18. Evaluation framework
-
-### 18.1 Model routing benchmark
-
-Build a repeatable microbenchmark suite with classes:
-
-- code repair;
-- bug localization;
-- test generation;
-- architecture reasoning;
-- instruction adherence;
-- tool-call formatting;
-- conversation correction;
-- long-context retrieval.
-
-Profiles are tied to:
-
-- model ID;
-- provider;
-- adapter version;
-- benchmark version;
-- timestamp;
-- sample count.
-
-### 18.2 Agent-level metrics
-
-Track at least:
-
-- task success rate;
-- first-pass success;
-- verified completion rate;
+- task and first-pass success;
+- verified completion;
 - repeated action rate;
 - stale evidence use rate;
-- clarification turns per task;
-- wrong-assumption correction recovery rate;
-- tokens / task;
-- frontier remote calls / task;
-- local calls / task;
-- tool calls / task;
+- clarification turns;
+- correction-recovery success;
+- tokens/frontier calls/local calls/tool calls per task;
 - latency;
-- provider failover success;
-- zero-cost violation count (must remain 0);
+- failover success;
+- zero-cost violations (must be 0);
 - conversation replay pass rate.
 
-### 18.3 A/B gates
+Build versioned microbenchmarks for code repair, localization, tests, architecture, instruction following, tool calls, conversational repair and long-context retrieval.
 
-New cognitive mechanisms MUST demonstrate value against the current baseline on fixed fixtures before becoming default.
+A/B test plan-memory coupling, ledger, adaptive folding, Wilson-LCB routing and council activation against current baselines. A complex mechanism that cannot prove net terminal value remains disabled by default.
 
-Examples:
+## 21. TDD and release gates
 
-- plan-memory coupling vs isolated retrieval;
-- execution ledger on/off;
-- adaptive context folding on/off;
-- quality-LCB router vs static hint router;
-- council on/off for high-complexity fixtures.
+Implementation is test-first.
 
-If a complex mechanism provides no net terminal gain, keep it disabled by default.
+Unit suites cover intent envelopes, causal invalidation, uncertainty control, clarification, plan graph, plan-memory coupling, ledger, folding/history search, profiles/Wilson LCB, anonymous provider policy, quota ledger, circuit breakers, task routing, DeepSeek paid/free distinction, council/critic independence and skill quarantine.
 
-## 19. Test strategy
+Integration scenarios include:
 
-All implementation follows TDD.
+- Kilo anonymous free -> quota exhaustion -> another legitimate free route -> local fallback;
+- higher-quality paid model never selected in zero-cost mode;
+- stale price proof blocks dispatch;
+- user correction invalidates only dependent plan/evidence;
+- repeated read reused only under unchanged state;
+- edit invalidates relevant reads/tests;
+- failing reproduction blocks completion;
+- critic defect blocks promotion until resolved;
+- restart mid-task avoids duplicate mutation;
+- 100-turn constraints remain active.
 
-### 19.1 Unit tests
+Adversarial tests inject misleading model metadata, missing prices, wrong returned model, stale quota data, repeated 429, 401/403, 5xx, hallucinated success, stale reads, conflicting agents, corrupted persisted state and semantic retry loops.
 
-New suites should cover:
+Release cannot be READY unless the full Python suite, canonical spec, zero-cost policy, conversation replay, provider fabric, local Ollama/release smoke where applicable, installer self-healing, packaged desktop self-test and independent final artifact-bound audit are green.
 
-- intent envelope;
-- causal invalidation;
-- uncertainty controller;
-- information-gain clarification;
-- plan graph;
-- plan-guided memory retrieval;
-- memory-driven replanning;
-- execution ledger inform/govern;
-- context folding;
-- history search;
-- model profile updater;
-- quality LCB;
-- anonymous-provider policy;
-- quota ledger;
-- circuit breaker;
-- task-aware routing;
-- DeepSeek paid/free distinction;
-- council gating;
-- critic independence;
-- skill promotion/quarantine.
+External free-provider live checks are diagnostic unless deterministic CI entitlement is available; mocked contract tests remain release authority for provider behavior.
 
-### 19.2 Integration tests
+## 22. Migration order
 
-Scenarios:
+### Stage A — deterministic truth and routing
 
-- Kilo anonymous free route -> quota exhausted -> another free route -> local fallback;
-- paid model with higher nominal quality never selected in zero-cost mode;
-- stale pricing proof blocks dispatch;
-- user correction invalidates dependent plan/memory evidence;
-- repeated repository read reused only under unchanged state;
-- edit invalidates relevant read and test evidence;
-- bug reproduction remains failing -> goal cannot complete;
-- independent critic finds defect -> final verifier blocks promotion;
-- restart mid-task -> exact state recovered without duplicate mutation;
-- 100-turn conversation -> active constraints preserved.
+Execution ledger, quota ledger, measured profiles, Kilo anonymous policy/adapter, task-aware routing, circuit breakers.
 
-### 19.3 Adversarial tests
+### Stage B — cognitive state
 
-Inject:
+IntentEnvelope v2, CognitiveState, causal invalidation, uncertainty controller, clarification policy.
 
-- misleading model metadata;
-- missing pricing fields;
-- provider returning a different model than requested;
-- stale quota headers;
-- repeated 429;
-- 401/403;
-- provider response claiming free while discovery says paid;
-- hallucinated success text while tests fail;
-- stale file reads;
-- conflicting simultaneous agents;
-- corrupted ledger/state record;
-- semantic retry loops;
-- user correction during an active run.
+### Stage C — long-horizon intelligence
 
-### 19.4 Release gates
+Plan graph, plan-guided retrieval, memory-driven replan, proactive folding, programmatic history access.
 
-A release cannot be READY unless:
+### Stage D — deliberation and learning
 
-- entire Python suite passes on supported versions;
-- canonical spec validation passes;
-- zero-cost policy tests pass;
-- conversation replay gate passes;
-- provider-fabric integration gate passes with mocked deterministic providers;
-- local Ollama smoke evidence passes on release VM where applicable;
-- installer self-healing gate remains green;
-- desktop packaged self-test passes;
-- independent final audit evidence is bound to exact commit/artifact.
+Independent critic, council integration, richer verified experience, negative memory, reliability/quarantine.
 
-Network-dependent free-provider smoke tests should be diagnostic/non-deterministic unless a stable CI credential/allowance exists; deterministic mocked contract tests remain the release authority for provider behavior.
+### Stage E — desktop and release hardening
 
-## 20. Source/research anchors
+Cognitive status UI, route explanations, activity events, 1,000+ conversation replays, A/B gates and release evidence.
 
-The implementation should preserve references to authoritative/current sources in provider policy files where applicable. Research informing this design includes:
+Order is intentional: sophisticated cognition must depend on deterministic current state before more LLM calls are added.
 
-- Kilo Gateway authentication/free-model documentation: `https://kilo.ai/docs/gateway/authentication`
-- Kilo model/provider routing: `https://kilo.ai/docs/gateway/models-and-providers`
-- OpenRouter free router: `https://openrouter.ai/openrouter/free`
-- Groq rate limits: `https://console.groq.com/docs/rate-limits`
-- DeepSeek API pricing: `https://api-docs.deepseek.com/quick_start/pricing/`
-- PMCoder plan-memory coupling: `https://arxiv.org/abs/2608.06811`
-- Ledger execution-state layer: `https://arxiv.org/abs/2608.00808`
-- SWE-MeM proactive memory: `https://arxiv.org/abs/2606.28434`
-- CAT context-as-tool: ACL Findings 2026, “Context as a Tool: Context Management for Long-Horizon SWE-Agents”
-- PARC self-reflective independent assessment: `https://arxiv.org/abs/2512.03549`
-- MemCoder repository-history learning: `https://arxiv.org/pdf/2603.13258`
-
-Provider facts must be revalidated during implementation because free tiers, model catalogs, limits and pricing can change.
-
-## 21. Migration design
-
-This is an incremental migration, not a rewrite.
-
-### Stage A — Explicit execution and route truth
-
-- execution ledger;
-- quota ledger;
-- dynamic provider/model profiles;
-- Kilo anonymous free adapter/policy;
-- task-aware routing;
-- circuit breakers.
-
-### Stage B — Cognitive state
-
-- IntentEnvelope v2;
-- CognitiveState;
-- causal dependency/invalidation graph;
-- uncertainty controller;
-- improved clarification.
-
-### Stage C — Long-horizon intelligence
-
-- hierarchical plan graph;
-- plan-guided retrieval;
-- memory-driven replanning;
-- proactive context folding;
-- programmatic history access.
-
-### Stage D — Deliberation and learning
-
-- independent critic;
-- council gating integration;
-- richer verified experience cards;
-- negative memory;
-- skill reliability/quarantine.
-
-### Stage E — Desktop and release hardening
-
-- cognitive status UI;
-- model-route explanations;
-- operational trace events;
-- conversation replay campaign;
-- A/B benchmark gates;
-- release evidence updates.
-
-Stages are ordered to make later cognition depend on deterministic state rather than adding more LLM calls first.
-
-## 22. Compatibility and migration invariants
+## 23. Compatibility invariants
 
 During migration:
 
-- existing public classes remain compatible unless a tested adapter is supplied;
-- existing conversation tests remain green;
-- existing goal/event persistence remains readable;
-- existing memory DBs are migrated forward without destructive reset;
-- existing SkillBook entries remain readable;
-- existing provider credentials remain usable;
-- existing provider atlas safety rules remain fail-closed;
-- existing desktop sessions/state survive upgrade where format migration is required;
-- existing installer auto-repair behavior may not regress.
+- preserve existing public behavior or provide tested adapters;
+- keep existing conversation/goal/state records readable;
+- migrate memory/SkillBook forward without destructive reset;
+- preserve provider credentials and fail-closed safety;
+- preserve desktop state/session compatibility where format migrations are needed;
+- preserve installer self-healing and current release gates.
 
-## 23. Done contracts
-
-The project phase is not complete merely because classes exist.
+## 24. Done contracts
 
 ### Cognitive Kernel DONE
 
-- user corrections causally invalidate only dependent state;
-- long conversations preserve active constraints and verified independent work;
-- uncertainty changes control behavior in tested scenarios;
-- goals cannot complete on stale evidence.
+- corrections causally invalidate only dependent state;
+- long conversations preserve active constraints and unrelated verified work;
+- uncertainty changes behavior in tests;
+- stale evidence cannot complete goals.
 
 ### Frontier Mesh DONE
 
-- real discovered models receive differentiated capability profiles;
-- strongest eligible zero-cost route is chosen for task class;
+- real discovered models receive differentiated measured profiles;
+- task-specific strongest eligible zero-cost route wins by conservative evidence;
 - unknown/paid routes never leak into zero-cost mode;
-- anonymous Kilo free route works when currently permitted and obeys rate limits;
-- quota exhaustion produces bounded failover, never quota evasion;
-- local model fallback is automatic in hybrid mode.
+- Kilo anonymous route functions only when current policy allows it and obeys limits;
+- exhausted routes fail over without quota evasion;
+- hybrid mode automatically reaches local fallback.
 
 ### Long-horizon DONE
 
-- plan state controls retrieval;
-- memory/failure state can trigger targeted replan;
-- execution ledger prevents/reduces redundant actions under unchanged state;
-- stale observations/evidence are not reused after relevant mutations;
-- context folding preserves lossless recoverability.
+- plan controls retrieval;
+- memory/failure evidence can trigger targeted replan;
+- ledger prevents/reduces redundant work under unchanged state;
+- stale observations/evidence never survive relevant mutation;
+- folding remains losslessly recoverable.
 
 ### Learning DONE
 
-- verified successful experience can be promoted;
-- unverified experience is rejected;
-- known bad strategies are remembered without permanent false prohibition;
-- learned skills can be quarantined by poor outcomes.
+- verified success promotes;
+- unverified memory is rejected;
+- negative memory prevents loops without creating permanent false bans;
+- poor learned skills can be quarantined.
 
 ### Desktop DONE
 
-- user can see goal, phase, next action, model route, tool activity and verification state;
-- no secret or hidden chain-of-thought is exposed;
-- UI remains primarily a simple chat/workbench.
+- goal, phase, next action, model route, tool activity and verification state are understandable live;
+- UI stays primarily a simple chat/workbench;
+- no secret or hidden chain-of-thought is exposed.
 
 ### Release DONE
 
-- full deterministic tests green;
-- Windows packaging/release gates green;
-- exact artifact evidence bound to final commit;
-- no known critical defect left open in these subsystems.
+- deterministic suites and Windows packaging/release gates are green;
+- exact evidence is bound to the final commit/artifacts;
+- no known critical defect remains open in these subsystems.
 
-## 24. Rejected alternatives
+## 25. Research/source anchors
 
-### A. “Just add more providers”
+Provider facts are revalidated during implementation because catalogs, pricing and limits change.
 
-Rejected as insufficient. It increases capacity but does not improve understanding, memory, planning or verification.
+- Kilo anonymous/free authentication: `https://kilo.ai/docs/gateway/authentication`
+- Kilo usage/billing and free rate limits: `https://kilo.ai/docs/gateway/usage-and-billing`
+- Kilo models/auto free: `https://kilo.ai/docs/gateway/models-and-providers`
+- OpenRouter free router: `https://openrouter.ai/openrouter/free`
+- Groq rate limits: `https://console.groq.com/docs/rate-limits`
+- DeepSeek API pricing: `https://api-docs.deepseek.com/quick_start/pricing`
+- PMCoder plan-memory coupling: `https://arxiv.org/abs/2608.06811`
+- Execution Ledger: `https://arxiv.org/abs/2608.00808`
+- SWE-MeM proactive memory: `https://arxiv.org/abs/2606.28434`
+- Context as a Tool: `https://arxiv.org/abs/2512.22087`
+- PARC independent self-assessment: `https://arxiv.org/abs/2512.03549`
+- MemCoder repository-history learning: `https://arxiv.org/abs/2603.13258`
 
-### B. “Always use a large multi-agent swarm”
+## 26. Rejected alternatives
 
-Rejected as default. It wastes free quotas, increases latency and creates coordination errors. Multi-agent work remains value-gated.
+- **Only add providers:** more capacity, not enough intelligence.
+- **Always use a large swarm:** wastes quota and adds coordination failure; councils remain value-gated.
+- **Always trust provider auto-routing:** useful fallback, not a substitute for AlinaCoder’s measured task-specific profiles.
+- **Show full internal reasoning:** rejected; expose structured operational trace/evidence instead.
+- **Quota evasion by IP/account rotation:** rejected for reliability/compliance.
+- **Rewrite around a new framework:** rejected; current deterministic foundations are valuable.
 
-### C. “Always use provider auto-router”
-
-Rejected as primary routing policy. Provider routers are useful fallback surfaces but cannot replace AlinaCoder’s own task-aware measured quality profiles and zero-cost proofs.
-
-### D. “Store the full chain-of-thought so the UI looks like Codex”
-
-Rejected. The UI will expose structured operational activity, evidence, assumptions and decisions instead.
-
-### E. “Rotate IP/accounts to evade quotas”
-
-Rejected. This undermines reliability/compliance and is not part of AlinaCoder.
-
-### F. “Rewrite everything around a new agent framework”
-
-Rejected. The repository already contains useful deterministic safety, memory, goal, orchestration, installer and desktop foundations.
-
-## 25. Final architectural invariant
-
-The fundamental invariant is:
+## 27. Final invariant
 
 > AlinaCoder must always know the difference between what the user asked, what the agent currently believes, what the repository actually proves, what remains uncertain, what action is planned next, and which model/tool is the best admissible way to obtain the missing evidence.
 
-All subsequent implementation decisions must preserve that separation.
+Every implementation decision must preserve that separation.
