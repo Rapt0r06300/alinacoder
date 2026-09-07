@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 class VisibleInstallerWindowsIntegrationTests(unittest.TestCase):
@@ -43,6 +44,71 @@ class VisibleInstallerWindowsIntegrationTests(unittest.TestCase):
             result = install_windows_integration(root, setup, create_shortcuts=False, register_uninstall=False)
             self.assertTrue((root / "AlinaCoderSetup.exe").is_file())
             self.assertEqual(result.maintenance_setup, root / "AlinaCoderSetup.exe")
+
+    def test_interrupted_maintenance_copy_never_corrupts_previous_setup(self) -> None:
+        from alinacoder.product import windows_integration as integration
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "AlinaCoder"
+            root.mkdir(parents=True)
+            (root / "AlinaCoder.exe").write_bytes(b"app")
+            maintenance = root / "AlinaCoderSetup.exe"
+            maintenance.write_bytes(b"LAST-HEALTHY-SETUP")
+            source = Path(td) / "new-setup.exe"
+            source.write_bytes(b"NEW-SETUP")
+
+            def interrupted_copy(src, dst, *args, **kwargs):
+                Path(dst).write_bytes(b"PARTIAL")
+                raise OSError("simulated interrupted maintenance copy")
+
+            with patch.object(integration.shutil, "copy2", side_effect=interrupted_copy):
+                with self.assertRaises(OSError):
+                    integration.install_windows_integration(
+                        root,
+                        source,
+                        create_shortcuts=False,
+                        register_uninstall=False,
+                        retry_attempts=1,
+                        sleep=lambda _: None,
+                    )
+
+            self.assertEqual(maintenance.read_bytes(), b"LAST-HEALTHY-SETUP")
+
+    def test_transient_shortcut_failure_is_repaired_automatically(self) -> None:
+        from alinacoder.product import windows_integration as integration
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "AlinaCoder"
+            root.mkdir(parents=True)
+            (root / "AlinaCoder.exe").write_bytes(b"app")
+            source = Path(td) / "setup.exe"
+            source.write_bytes(b"setup")
+            calls = 0
+
+            def flaky_shortcut(path: Path, target: Path, working_dir: Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise OSError("temporary shell integration failure")
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"shortcut")
+
+            with patch.object(integration.os, "name", "nt"), patch.object(
+                integration,
+                "_create_shortcut",
+                side_effect=flaky_shortcut,
+            ):
+                plan = integration.install_windows_integration(
+                    root,
+                    source,
+                    create_desktop_shortcut=False,
+                    register_uninstall=False,
+                    retry_attempts=3,
+                    sleep=lambda _: None,
+                )
+
+            self.assertEqual(calls, 2)
+            self.assertTrue(plan.start_menu_shortcut.is_file())
 
 
 if __name__ == "__main__":
