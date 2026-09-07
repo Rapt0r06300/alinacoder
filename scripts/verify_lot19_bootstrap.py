@@ -48,7 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     metadata_path = args.install_dir / "install.json"
     state_path = args.install_dir / "bootstrap-state.json"
     receipt_path = args.install_dir / "bootstrap-receipt.json"
-    required_paths = (args.artifact, installed, metadata_path, state_path, receipt_path)
+    recovery_path = args.install_dir / "recovery-state.json"
+    required_paths = (args.artifact, installed, metadata_path, state_path, receipt_path, recovery_path)
     failures: list[str] = []
     for path in required_paths:
         if not path.exists():
@@ -62,12 +63,31 @@ def main(argv: list[str] | None = None) -> int:
     metadata = json.loads(metadata_path.read_text(encoding="utf-8-sig")) if metadata_path.exists() else {}
     state = json.loads(state_path.read_text(encoding="utf-8-sig")) if state_path.exists() else {}
     receipt = json.loads(receipt_path.read_text(encoding="utf-8-sig")) if receipt_path.exists() else {}
+    recovery = json.loads(recovery_path.read_text(encoding="utf-8-sig")) if recovery_path.exists() else {}
     if metadata.get("bootstrap_ready") is not True:
         failures.append("install_metadata_not_ready")
     if state.get("ready") is not True or receipt.get("ready") is not True:
         failures.append("bootstrap_state_not_ready")
     if metadata.get("selected_model") != args.model or state.get("selected_model") != args.model:
         failures.append("selected_model_mismatch")
+
+    if recovery.get("schema_version") != 1:
+        failures.append("self_healing_schema_invalid")
+    if recovery.get("status") != "ready" or recovery.get("ready") is not True:
+        failures.append("self_healing_not_ready")
+    if recovery.get("operation") not in {"install", "repair", "upgrade"}:
+        failures.append("self_healing_operation_invalid")
+    try:
+        recovery_attempt = int(recovery.get("attempt", 0))
+        recovery_max_attempts = int(recovery.get("max_attempts", 0))
+    except (TypeError, ValueError):
+        recovery_attempt = 0
+        recovery_max_attempts = 0
+    if recovery_max_attempts < 1 or recovery_attempt < 1 or recovery_attempt > recovery_max_attempts:
+        failures.append("self_healing_attempt_budget_invalid")
+    installed_path = str(recovery.get("installed_path") or "")
+    if recovery_path.exists() and Path(installed_path) != installed:
+        failures.append("self_healing_installed_path_mismatch")
 
     components = dict(state.get("components") or {})
     for component in ("git", "ollama", f"model:{args.model}"):
@@ -96,6 +116,14 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "ok": not failures,
         "bootstrap_e2e": not failures,
+        "self_healing_ready": bool(
+            recovery.get("status") == "ready"
+            and recovery.get("ready") is True
+            and recovery_attempt >= 1
+            and recovery_max_attempts >= recovery_attempt
+        ),
+        "recovery_attempt": recovery_attempt,
+        "recovery_max_attempts": recovery_max_attempts,
         "commit_sha": args.commit,
         "artifact_sha256": artifact_digest,
         "installed_artifact_sha256": installed_digest,
