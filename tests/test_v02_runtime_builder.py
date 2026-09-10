@@ -33,11 +33,12 @@ class RuntimeBuilderTests(unittest.TestCase):
     def test_free_cloud_does_not_include_local_fallback(self) -> None:
         fabric = build_default_inference_fabric(FakeVault({"openrouter": "or-key"}), mode="free-cloud")
         self.assertIn("openrouter", fabric.provider_ids())
+        self.assertIn("kilo_gateway", fabric.provider_ids())
         self.assertNotIn("ollama_local", fabric.provider_ids())
 
-    def test_missing_credentials_skip_remote_candidate_without_blocking_other_routes(self) -> None:
+    def test_missing_credentials_skip_credential_gated_remote_candidates_without_blocking_anonymous_or_local_routes(self) -> None:
         fabric = build_default_inference_fabric(FakeVault({}), mode="hybrid")
-        self.assertEqual(fabric.provider_ids(), ("ollama_local",))
+        self.assertEqual(fabric.provider_ids(), ("kilo_gateway", "ollama_local"))
 
 
 if __name__ == "__main__":
