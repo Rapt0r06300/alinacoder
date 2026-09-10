@@ -171,9 +171,11 @@ class ExperientialFrontierGatewayTests(unittest.TestCase):
         self.assertEqual(models[0].context_tokens, 1_050_000)
         self.assertEqual(models[0].metadata["lineage"], "gpt-6-astra")
 
-    def test_default_runtime_wires_experiential_only_when_credential_exists(self):
+    def test_default_runtime_wires_experiential_when_credential_exists_alongside_documented_anonymous_routes(self):
         fabric = build_default_inference_fabric(_Vault(), mode="free-cloud")
-        self.assertEqual(fabric.provider_ids(), ("experiential_gateway",))
+        self.assertIn("experiential_gateway", fabric.provider_ids())
+        self.assertIn("kilo_gateway", fabric.provider_ids())
+        self.assertNotIn("ollama_local", fabric.provider_ids())
 
     def test_positive_price_experiential_route_requires_sponsored_proof(self):
         now = self._now()
