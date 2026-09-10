@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import re
 from typing import Any
 
@@ -26,6 +26,15 @@ class IntentEnvelope:
     uncertainty_causes: tuple[str, ...] = ()
     source_turn_ids: tuple[str, ...] = ()
     model_proposal: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        value = asdict(self)
+        for key in (
+            "alternatives", "references", "requirements_added", "requirements_changed",
+            "requirements_cancelled", "constraints", "prohibitions", "uncertainty_causes", "source_turn_ids",
+        ):
+            value[key] = list(value[key])
+        return value
 
 
 class IntentCompiler:
