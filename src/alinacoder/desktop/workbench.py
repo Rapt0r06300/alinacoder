@@ -219,6 +219,11 @@ class DesktopWorkbench:
                 "phase": "inference",
                 "provider_id": None,
                 "model_id": None,
+                "task_class": None,
+                "route_reason": None,
+                "zero_cost_verdict": None,
+                "billing_class": None,
+                "quality_lcb": None,
                 "error": None,
                 "started_at": self._utc_now(),
                 "finished_at": None,
@@ -287,6 +292,14 @@ class DesktopWorkbench:
         provider_id = str(response.provider_id)
         model_id = str(response.model_id)
         assistant_text = str(response.text)
+        raw_metadata = response.metadata if isinstance(getattr(response, "metadata", None), dict) else {}
+        safe_metadata = sanitize_activity_details(raw_metadata)
+        route_details = {
+            key: safe_metadata.get(key)
+            for key in ("task_class", "route_reason", "zero_cost_verdict", "billing_class", "quality_lcb")
+            if safe_metadata.get(key) is not None
+        }
+        route_details.update({"provider_id": provider_id, "model_id": model_id})
         assistant = {
             "role": "assistant",
             "text": assistant_text,
@@ -306,6 +319,14 @@ class DesktopWorkbench:
             phase="inference",
             details={"provider_id": provider_id, "model_id": model_id},
         )
+        self.emit_activity(
+            "route_selected",
+            "Selected admissible inference route",
+            status="success",
+            run_id=run_id,
+            phase="inference",
+            details=route_details,
+        )
         finished_at = self._utc_now()
 
         def mutate_run(data: dict[str, Any]) -> None:
@@ -322,6 +343,11 @@ class DesktopWorkbench:
                     "phase": "complete",
                     "provider_id": provider_id,
                     "model_id": model_id,
+                    "task_class": route_details.get("task_class"),
+                    "route_reason": route_details.get("route_reason"),
+                    "zero_cost_verdict": route_details.get("zero_cost_verdict"),
+                    "billing_class": route_details.get("billing_class"),
+                    "quality_lcb": route_details.get("quality_lcb"),
                     "error": None,
                     "finished_at": finished_at,
                 }
@@ -330,7 +356,7 @@ class DesktopWorkbench:
         self._mutate(
             "desktop_run_completed",
             mutate_run,
-            {"run_id": run_id, "provider_id": provider_id, "model_id": model_id},
+            {"run_id": run_id, **route_details},
         )
         self.emit_activity(
             "run_completed",
@@ -338,7 +364,7 @@ class DesktopWorkbench:
             status="success",
             run_id=run_id,
             phase="complete",
-            details={"provider_id": provider_id, "model_id": model_id},
+            details=route_details,
         )
         return self._receipt(
             "send_message",
@@ -348,7 +374,7 @@ class DesktopWorkbench:
                 "provider_id": provider_id,
                 "model_id": model_id,
                 "quota_remaining": response.quota_remaining,
-                "metadata": sanitize_activity_details(response.metadata),
+                "metadata": safe_metadata,
                 "run_id": run_id,
             },
         )
