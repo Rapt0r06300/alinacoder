@@ -14,21 +14,26 @@ class CredentialReader(Protocol):
 
 
 def _remote_provider(definition: ProviderDefinition, api_key: str) -> ZeroCostProvider | None:
-    if definition.retired or not api_key:
+    if definition.retired:
+        return None
+    has_credential = bool(api_key)
+    if not has_credential and not definition.anonymous_free_allowed:
         return None
     if definition.provider_id == "experiential_gateway":
+        if not has_credential:
+            return None
         return ExperientialProvider(definition, api_key=api_key)
     if definition.protocol == "gemini":
-        if not definition.base_url:
+        if not definition.base_url or not has_credential:
             return None
         return GeminiProvider(definition, api_key=api_key)
     if definition.protocol == "openai_chat":
-        # A route without a concrete API base cannot be executed safely by the
-        # generic adapter. Keep it in the normative atlas, but do not construct
-        # a runtime provider until a provider-specific adapter exists.
+        # Anonymous construction is intentionally limited by the provider
+        # definition. The fabric still admits only exact current zero-price
+        # routes, so this cannot create a paid anonymous fallback.
         if not definition.base_url:
             return None
-        return OpenAICompatibleProvider(definition, api_key=api_key)
+        return OpenAICompatibleProvider(definition, api_key=api_key or None)
     return None
 
 
@@ -41,8 +46,11 @@ def build_default_inference_fabric(
     """Build the executable provider set for the selected inference mode.
 
     The atlas is discovery/qualification policy; this builder only instantiates
-    routes that can actually be called. Missing credentials simply leave a
-    remote provider inactive. Local Ollama never requires an API credential.
+    routes that can actually be called. Missing credentials leave ordinary
+    remote providers inactive. Providers with explicitly documented anonymous
+    free access may be constructed without a credential, but their individual
+    models still pass the fabric's exact zero-cost admission policy. Local
+    Ollama never requires an API credential.
     """
 
     normalized = str(mode).strip().lower()
