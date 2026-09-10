@@ -31,6 +31,7 @@ class ProviderDefinition:
     retired: bool = False
     source_urls: tuple[str, ...] = ()
     notes: str = ""
+    anonymous_free_allowed: bool = False
 
     def __post_init__(self) -> None:
         if not self.provider_id:
@@ -39,6 +40,13 @@ class ProviderDefinition:
             raise ValueError(f"unsupported provider protocol: {self.protocol}")
         if self.retired and self.lifecycle_state not in {"RETIRED", "TOMBSTONED"}:
             raise ValueError("retired provider must be RETIRED or TOMBSTONED")
+        if self.anonymous_free_allowed and (
+            self.retired
+            or self.account_proof_required
+            or not self.structurally_auto_admissible
+            or ProviderSafetyClass.ZERO_PRICE_MODEL not in self.safe_classes
+        ):
+            raise ValueError("anonymous free access requires active exact-zero structurally safe routing")
         if self.https_only:
             for value in (self.base_url, self.discovery_url):
                 if value and not value.startswith("https://"):
@@ -92,10 +100,12 @@ def normative_provider_atlas() -> ProviderAtlas:
             structurally_auto_admissible=True,
             aggregator=True,
             source_urls=(
+                "https://kilo.ai/docs/gateway/authentication",
                 "https://kilo.ai/docs/gateway/models-and-providers",
                 "https://kilo.ai/docs/gateway/usage-and-billing",
             ),
-            notes="Only exact current zero-price/free routes; provider-side paid fallback is forbidden.",
+            notes="Anonymous access is allowed only for exact current zero-price/free routes; provider-side paid fallback is forbidden.",
+            anonymous_free_allowed=True,
         ),
         ProviderDefinition(
             "experiential_gateway",
