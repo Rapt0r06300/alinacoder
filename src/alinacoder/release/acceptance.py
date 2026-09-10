@@ -107,21 +107,23 @@ class SpecAcceptanceMatrix:
         "conversation": (
             "evolving_intent", "correction_negation", "branch_isolation", "deictic_visible_references",
             "clarification_stopping", "user_preference_revision", "repeated_correction_no_repeat_violation",
-            "french_noisy_hesitant_input",
+            "french_noisy_hesitant_input", "causal_correction", "thousand_case_replay",
         ),
         "repository_engineering": (
             "multi_file_bug_repair", "feature_addition", "dependency_sensitive_refactor",
             "implicit_requirement_recovery", "test_generation_use", "regression_detection",
-            "partial_failure_recovery", "long_horizon_no_premature_stop",
+            "partial_failure_recovery", "long_horizon_no_premature_stop", "execution_ledger_invalidation",
+            "phase_aware_memory", "adaptive_context_folding",
         ),
         "control_safety": (
             "stale_response_rejection", "cancellation_fencing", "stale_patch_rejection", "effect_idempotency",
             "untrusted_repo_instructions_are_data", "memory_promotion_governance", "exact_main_enforcement",
+            "critic_independence", "verified_learning_quarantine",
         ),
         "provider_fabric": (
             "free_route_disappears", "quota_exhausted", "model_alias_changes", "provider_timeout",
             "same_lineage_failover", "cognitive_failover", "no_eligible_cloud_route", "local_only_fallback",
-            "zero_paid_calls",
+            "zero_paid_calls", "anonymous_kilo_free", "measured_capability_routing", "quota_persistence_reset",
         ),
         "continuity": (
             "process_crash", "restart_during_mission", "model_switch", "user_correction_in_flight",
@@ -131,7 +133,7 @@ class SpecAcceptanceMatrix:
             "clean_first_run", "ordinary_chat_without_advanced_panels", "pause_resume", "all_stop",
             "plan_artifact_selection", "targeted_edit_continue", "verification_visibility", "low_idle_resource_use",
             "live_activity_persistence", "safe_activity_redaction", "observable_run_lifecycle",
-            "responsive_message_execution", "activity_first_progressive_disclosure",
+            "responsive_message_execution", "activity_first_progressive_disclosure", "cognitive_route_trace",
         ),
     }
 
