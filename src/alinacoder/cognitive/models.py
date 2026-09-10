@@ -9,6 +9,7 @@ class CognitiveState:
     state_version: int = 0
     active_goal_id: str | None = None
     intent_revision: int = 0
+    active_intent_node: str | None = None
     plan_revision: int = 0
     current_phase: str = ""
     current_subtask_id: str | None = None
@@ -42,6 +43,7 @@ class CognitiveState:
             state_version=int(data.get("state_version", 0)),
             active_goal_id=data.get("active_goal_id"),
             intent_revision=int(data.get("intent_revision", 0)),
+            active_intent_node=data.get("active_intent_node"),
             plan_revision=int(data.get("plan_revision", 0)),
             current_phase=str(data.get("current_phase", "")),
             current_subtask_id=data.get("current_subtask_id"),
