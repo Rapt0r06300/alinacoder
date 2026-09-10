@@ -38,6 +38,10 @@ class CognitiveDesktopTraceTests(unittest.TestCase):
                 workbench.send_message("fix the parser traceback")
                 run = workbench.current_run()
                 self.assertIsNotNone(run)
+                assert run is not None
+                self.assertIn("task_class", run)
+                self.assertIn("zero_cost_verdict", run)
+                self.assertIn("route_reason", run)
                 self.assertEqual(run["task_class"], "debug")
                 self.assertEqual(run["zero_cost_verdict"], "PROVEN_ZERO_COST")
                 self.assertIn("debugging LCB", run["route_reason"])
