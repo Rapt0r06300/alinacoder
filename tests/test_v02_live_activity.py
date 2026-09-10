@@ -64,9 +64,13 @@ class LiveActivityTests(unittest.TestCase):
             workbench.close()
 
         kinds = [item["kind"] for item in events]
-        self.assertEqual(kinds[-4:], ["run_started", "inference_started", "inference_completed", "run_completed"])
-        self.assertEqual(events[-2]["details"]["provider_id"], "openrouter")
-        self.assertEqual(events[-2]["details"]["model_id"], "model:free")
+        self.assertEqual(
+            kinds[-5:],
+            ["run_started", "inference_started", "inference_completed", "route_selected", "run_completed"],
+        )
+        route_event = next(item for item in events if item["kind"] == "route_selected")
+        self.assertEqual(route_event["details"]["provider_id"], "openrouter")
+        self.assertEqual(route_event["details"]["model_id"], "model:free")
         self.assertEqual(current["status"], "completed")
         self.assertEqual(receipt["details"]["assistant_text"], "Bonjour")
 
