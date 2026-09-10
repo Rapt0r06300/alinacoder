@@ -9,6 +9,8 @@
     {"case_id":"conversation.user_preference_revision","path":"tests/test_lot06_conversation.py","test_name":"test_preference_can_only_be_promoted_from_user_origin"},
     {"case_id":"conversation.repeated_correction_no_repeat_violation","path":"tests/test_lot06_conversation.py","test_name":"test_twenty_turn_repairs_preserve_latest_intent_and_unrelated_verified_work"},
     {"case_id":"conversation.french_noisy_hesitant_input","path":"tests/test_lot06_conversation.py","test_name":"test_raw_and_meaning_are_both_preserved_for_noisy_french"},
+    {"case_id":"conversation.causal_correction","path":"tests/test_cognitive_kernel.py","test_name":"test_dependency_graph_invalidates_descendants_only"},
+    {"case_id":"conversation.thousand_case_replay","path":"tests/test_conversation_replay_v2.py","test_name":"test_runner_passes_structural_release_corpus_and_reports_categories"},
 
     {"case_id":"repository_engineering.multi_file_bug_repair","path":"tests/test_lot09_engineering.py","test_name":"test_change_impact_simulator_computes_transitive_blast_radius_and_tests"},
     {"case_id":"repository_engineering.feature_addition","path":"tests/test_lot14_16_acceptance_hardening.py","test_name":"test_conversation_goal_diff_tests_commit_and_restart_use_canonical_state"},
@@ -18,6 +20,9 @@
     {"case_id":"repository_engineering.regression_detection","path":"tests/test_lot06_10_completion_audit.py","test_name":"test_semantic_regression_migration_evidence_and_self_correction"},
     {"case_id":"repository_engineering.partial_failure_recovery","path":"tests/test_state_recovery.py","test_name":"test_effect_intent_is_idempotent_and_pending_effects_recover"},
     {"case_id":"repository_engineering.long_horizon_no_premature_stop","path":"tests/test_goal_engine.py","test_name":"test_stagnation_triggers_replan_instead_of_repeat"},
+    {"case_id":"repository_engineering.execution_ledger_invalidation","path":"tests/test_execution_ledger.py","test_name":"test_modification_invalidates_only_affected_observations"},
+    {"case_id":"repository_engineering.phase_aware_memory","path":"tests/test_cognitive_kernel.py","test_name":"test_phase_aware_ranking_prefers_current_phase_and_failure_relevance"},
+    {"case_id":"repository_engineering.adaptive_context_folding","path":"tests/test_cognitive_kernel.py","test_name":"test_context_folder_preserves_source_event_ids_without_mutating_history"},
 
     {"case_id":"control_safety.stale_response_rejection","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_continuity_envelope_and_stale_response_gate"},
     {"case_id":"control_safety.cancellation_fencing","path":"tests/test_state_recovery.py","test_name":"test_stale_writer_and_stale_version_are_rejected"},
@@ -26,6 +31,8 @@
     {"case_id":"control_safety.untrusted_repo_instructions_are_data","path":"tests/test_security_kernel.py","test_name":"test_untrusted_prompt_cannot_escalate_to_privileged_effect"},
     {"case_id":"control_safety.memory_promotion_governance","path":"tests/test_lot04_lot05_completion.py","test_name":"test_skillbook_is_project_scoped_and_promotes_only_verified_experience"},
     {"case_id":"control_safety.exact_main_enforcement","path":"tests/test_lot08_tools.py","test_name":"test_git_executor_allows_main_only_and_reconciles_unknown_result"},
+    {"case_id":"control_safety.critic_independence","path":"tests/test_cognitive_kernel.py","test_name":"test_critic_policy_is_value_gated_and_packet_redacts_private_reasoning"},
+    {"case_id":"control_safety.verified_learning_quarantine","path":"tests/test_cognitive_kernel.py","test_name":"test_skillbook_quarantines_poor_verified_skill_without_deleting_it"},
 
     {"case_id":"provider_fabric.free_route_disappears","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_price_change_quarantines_route_before_next_call"},
     {"case_id":"provider_fabric.quota_exhausted","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_quota_exhaustion_fails_over"},
@@ -36,6 +43,9 @@
     {"case_id":"provider_fabric.no_eligible_cloud_route","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_only_exact_fresh_proven_zero_cost_route_is_admissible"},
     {"case_id":"provider_fabric.local_only_fallback","path":"tests/test_lot13_resources.py","test_name":"test_selects_strongest_local_model_that_fits"},
     {"case_id":"provider_fabric.zero_paid_calls","path":"tests/test_lot07_frontier_fabric.py","test_name":"test_only_exact_fresh_proven_zero_cost_route_is_admissible"},
+    {"case_id":"provider_fabric.anonymous_kilo_free","path":"tests/test_frontier_mesh_v2.py","test_name":"test_default_hybrid_runtime_constructs_anonymous_kilo_without_key"},
+    {"case_id":"provider_fabric.measured_capability_routing","path":"tests/test_frontier_mesh_v2.py","test_name":"test_profile_store_penalizes_cold_start_below_proven_route"},
+    {"case_id":"provider_fabric.quota_persistence_reset","path":"tests/test_frontier_mesh_v2.py","test_name":"test_quota_ledger_persists_429_cooldown_until_reset"},
 
     {"case_id":"continuity.process_crash","path":"tests/test_state_recovery.py","test_name":"test_state_is_reconstructible_and_evidence_becomes_stale_after_change"},
     {"case_id":"continuity.restart_during_mission","path":"tests/test_goal_engine.py","test_name":"test_goal_persists_across_restart_and_plan_replacement_preserves_progress"},
@@ -56,6 +66,7 @@
     {"case_id":"desktop_ux.safe_activity_redaction","path":"tests/test_v02_live_activity.py","test_name":"test_activity_is_persisted_with_monotonic_ids_and_safe_details"},
     {"case_id":"desktop_ux.observable_run_lifecycle","path":"tests/test_v02_live_activity.py","test_name":"test_successful_inference_emits_required_run_lifecycle_and_provenance"},
     {"case_id":"desktop_ux.responsive_message_execution","path":"tests/test_v02_live_activity_ui_contract.py","test_name":"test_gui_uses_inference_only_background_worker_and_tk_polling"},
-    {"case_id":"desktop_ux.activity_first_progressive_disclosure","path":"tests/test_v02_live_activity_ui_contract.py","test_name":"test_activity_is_first_secondary_inspector"}
+    {"case_id":"desktop_ux.activity_first_progressive_disclosure","path":"tests/test_v02_live_activity_ui_contract.py","test_name":"test_activity_is_first_secondary_inspector"},
+    {"case_id":"desktop_ux.cognitive_route_trace","path":"tests/test_cognitive_desktop_trace.py","test_name":"test_completed_run_exposes_safe_task_route_and_zero_cost_provenance"}
   ]
 }
